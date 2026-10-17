@@ -1,0 +1,36 @@
+name: Acquire Unity ULF (one-time)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  acquireUlf:
+    name: Acquire .ulf license file
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install unity-license-activate
+        run: npm install --global unity-license-activate
+
+      - name: Acquire .ulf license file
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          unity-license-activate "$UNITY_EMAIL" "$UNITY_PASSWORD" ".github/alf/Unity_v6000.0.84f1.alf"
+          echo '--- generated files ---'
+          ls -la
+
+      - name: Upload .ulf artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Unity_ULF
+          path: '*.ulf'
+          if-no-files-found: error
