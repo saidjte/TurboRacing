@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using UnityEditor;
+using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 
@@ -49,10 +50,12 @@ public static class BuildCommand
         PlayerSettings.allowedAutorotateToPortraitUpsideDown = false;
 
         PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel24;
-        PlayerSettings.SetScriptingBackend(BuildTargetGroup.Android, ScriptingImplementation.Mono2x);
+
+        // IL2CPP مطلوب لدعم ARM64 (Mono لا يدعمه على أندرويد)
+        PlayerSettings.SetScriptingBackend(BuildTargetGroup.Android, ScriptingImplementation.IL2CPP);
         PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARMv7 | AndroidArchitecture.ARM64;
 
-        Debug.Log("[BuildCommand] تم ضبط إعدادات اللاعب لأندرويد");
+        Debug.Log("[BuildCommand] تم ضبط إعدادات اللاعب لأندرويد (IL2CPP, ARMv7+ARM64)");
     }
 
     private static void CreateAndSaveScene()
