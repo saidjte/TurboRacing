@@ -14,11 +14,11 @@ jobs:
             -v "$GITHUB_WORKSPACE:/workspace" \
             -w /workspace \
             unityci/editor:ubuntu-6000.0.84f1-base-3.2.2 \
-            bash -c "unity-editor -batchmode -nographics -quit -logFile /dev/stdout -createManualActivationFile || true; echo '--- workspace files ---'; ls -la /workspace; mv -v /workspace/Unity_v*.alf /workspace/Unity_v6000.0.84f1.alf"
+            bash -c "unity-editor -batchmode -nographics -quit -logFile /dev/stdout -createManualActivationFile || true; echo '--- workspace files ---'; ls -la /workspace"
 
       - name: Upload activation file artifact
         uses: actions/upload-artifact@v4
         with:
           name: Unity_Activation_License
-          path: Unity_v6000.0.84f1.alf
+          path: Unity_v*.alf
           if-no-files-found: error
