@@ -239,7 +239,7 @@ public class TrackBuilder : MonoBehaviour
 
         Tile tile = ScriptableObject.CreateInstance<Tile>();
         tile.sprite = sprite;
-        tile.anchor = new Vector2(0.5f, 0.5f); // توسيط البلاطة داخل الخلية
+        // البلاطة تتموضع تلقائياً بمحاذاة مركز الخلية (pivot المركز للسبرايت)
         tile.name = tileName;
         return tile;
     }
