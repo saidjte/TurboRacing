@@ -284,9 +284,12 @@ public static class UiKit
         if (onClick != null) btn.onClick.AddListener(onClick);
 
         // نص ممتد يملأ الزر
+        // (v0.6.7) إصلاح جوهري: معامل label كان يُستقبل ولا يُسند أبداً —
+        // كل أزرار القوائم كانت فارغة منذ المرحلة 4 (START RACE / RESUME / ...)
         Text text = MakeText(go.transform, "Label",
             new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, size,
             fontSize, TextAnchor.MiddleCenter, fg, style);
+        text.text = label;
         RectTransform trt = text.GetComponent<RectTransform>();
         trt.anchorMin = Vector2.zero;
         trt.anchorMax = Vector2.one;

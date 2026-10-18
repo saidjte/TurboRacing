@@ -38,11 +38,11 @@ public class MenuUI : MonoBehaviour
             120, TextAnchor.MiddleCenter, UiKit.Amber, FontStyle.Bold).text = "TURBO RACING";
 
         UiKit.MakeText(root, "Subtitle",
-            new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -250f), new Vector2(1400f, 60f),
+            new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -345f), new Vector2(1400f, 60f),
             38, TextAnchor.MiddleCenter, new Color(1f, 1f, 1f, 0.75f)).text = "THIRD-PERSON 2D RACING";
 
         statsText = UiKit.MakeText(root, "Stats",
-            new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -335f), new Vector2(1500f, 70f),
+            new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -430f), new Vector2(1500f, 70f),
             44, TextAnchor.MiddleCenter, Color.white);
 
         UiKit.MakeButton(root, "BtnStart", "START RACE",
