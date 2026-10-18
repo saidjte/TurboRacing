@@ -57,6 +57,9 @@ jobs:
           echo "Using build-tools: $BT"
           APK=$(ls build/Android/*.apk | head -1)
           ls -la build/Android/
+          # build/ is owned by root (unity-builder docker); take ownership so
+          # apksigner can write the signed output next to the input
+          sudo chown -R "$(id -u):$(id -g)" build
           # AGP output is already zipaligned; apksigner re-signs in place
           # (replaces any existing debug signature) while preserving alignment
           "$BT/apksigner" sign \
