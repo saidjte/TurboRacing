@@ -45,6 +45,10 @@ jobs:
           KS_ALIAS_PASS: ${{ secrets.ANDROID_KEY_ALIAS_PASSWORD }}
         run: |
           echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/game.keystore"
+          # Sterilize secret values (guards against trailing newlines/spaces)
+          KS_PASS="$(printf '%s' "$KS_PASS" | tr -d '[:space:]')"
+          KS_ALIAS="$(printf '%s' "$KS_ALIAS" | tr -d '[:space:]')"
+          KS_ALIAS_PASS="$(printf '%s' "$KS_ALIAS_PASS" | tr -d '[:space:]')"
           BT=""
           for v in 35.0.0 34.0.0 36.0.0 33.0.2 33.0.1; do
             if [ -x "$ANDROID_HOME/build-tools/$v/apksigner" ]; then BT="$ANDROID_HOME/build-tools/$v"; break; fi
