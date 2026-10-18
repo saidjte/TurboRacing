@@ -2,106 +2,98 @@ using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// TurboRacing - المرحلة 3
-/// واجهة السباق (HUD) مبنية بالكود بالكامل:
-/// - عدد اللفات (يسار أعلى) + زمن اللفة الحالية (وسط أعلى) + الأفضل/الأخير (يمين أعلى)
-/// - شارة إصدار اللعبة صغيرة أسفل يمين الشاشة (تقرأ من GameVersion)
-/// - عرض فقط: لا يلتقط اللمس (raycastTarget = false) حتى لا يعيق أزرار القيادة
+/// TurboRacing - المرحلة 4 (تطوير واجهة المرحلة 3)
+/// HUD السباق: عدد اللفة الحالية من الإجمالي + زمن اللفة + الأفضل/الأخير
+/// + عد تنازلي كبير وسط الشاشة + زر إيقاف مؤقت + شارة الإصدار.
+/// يظهر فقط أثناء (Countdown/Racing/Paused) ويُدار من RaceFlow عبر فحص الحالة.
 /// </summary>
 public class RaceHUD : MonoBehaviour
 {
+    GameObject canvasGO;
     Text lapText;
     Text timeText;
     Text bestText;
     Text lastText;
+    Text countdownText;
+    bool hudShown;
 
     void Start()
     {
         BuildCanvas();
+        canvasGO.SetActive(false); // RaceFlow سيظهره عند بدء السباق
     }
 
     void BuildCanvas()
     {
-        GameObject canvasGO = new GameObject("HUDCanvas", typeof(Canvas), typeof(CanvasScaler));
-        Canvas canvas = canvasGO.GetComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        // ترتيب 10: فوق الحلبة وتحت لوحات القوائم
+        canvasGO = UiKit.NewCanvas("HUDCanvas", 10);
 
-        CanvasScaler scaler = canvasGO.GetComponent<CanvasScaler>();
-        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1920f, 1080f);
-        scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
-        scaler.matchWidthOrHeight = 1f;
-
-        lapText  = MakeText(canvasGO.transform, "LapText",
+        lapText = UiKit.MakeText(canvasGO.transform, "LapText",
             new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(40f, -30f),
-            new Vector2(500f, 90f), 64, TextAnchor.UpperLeft);
+            new Vector2(500f, 90f), 64, TextAnchor.UpperLeft, Color.white, FontStyle.Bold);
 
-        timeText = MakeText(canvasGO.transform, "TimeText",
+        timeText = UiKit.MakeText(canvasGO.transform, "TimeText",
             new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -30f),
-            new Vector2(700f, 110f), 84, TextAnchor.UpperCenter);
+            new Vector2(700f, 110f), 84, TextAnchor.UpperCenter, Color.white, FontStyle.Bold);
 
-        bestText = MakeText(canvasGO.transform, "BestText",
-            new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-40f, -30f),
-            new Vector2(700f, 60f), 44, TextAnchor.UpperRight);
+        // إزاحة لليسار لتفادي زر الإيقاف أعلى اليمين
+        bestText = UiKit.MakeText(canvasGO.transform, "BestText",
+            new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-150f, -30f),
+            new Vector2(700f, 60f), 44, TextAnchor.UpperRight, Color.white);
 
-        lastText = MakeText(canvasGO.transform, "LastText",
-            new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-40f, -96f),
-            new Vector2(700f, 60f), 44, TextAnchor.UpperRight);
+        lastText = UiKit.MakeText(canvasGO.transform, "LastText",
+            new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-150f, -96f),
+            new Vector2(700f, 60f), 44, TextAnchor.UpperRight, Color.white);
 
-        Text versionText = MakeText(canvasGO.transform, "VersionText",
+        countdownText = UiKit.MakeText(canvasGO.transform, "CountdownText",
+            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 110f),
+            new Vector2(800f, 280f), 170, TextAnchor.MiddleCenter, UiKit.Amber, FontStyle.Bold);
+        countdownText.text = "";
+
+        UiKit.MakeText(canvasGO.transform, "VersionText",
             new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-16f, -12f),
-            new Vector2(300f, 40f), 26, TextAnchor.LowerRight);
-        versionText.text = "v" + GameVersion.Number;
-        versionText.color = new Color(1f, 1f, 1f, 0.55f);
-    }
+            new Vector2(300f, 40f), 26, TextAnchor.LowerRight, new Color(1f, 1f, 1f, 0.55f))
+            .text = "v" + GameVersion.Number;
 
-    Text MakeText(Transform parent, string name,
-        Vector2 anchor, Vector2 pivot, Vector2 anchoredPos, Vector2 size,
-        int fontSize, TextAnchor alignment)
-    {
-        GameObject go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
-        go.transform.SetParent(parent, false);
-
-        RectTransform rt = go.GetComponent<RectTransform>();
-        rt.anchorMin = anchor;
-        rt.anchorMax = anchor;
-        rt.pivot = pivot;
-        rt.anchoredPosition = anchoredPos;
-        rt.sizeDelta = size;
-
-        Text text = go.GetComponent<Text>();
-        text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        text.fontSize = fontSize;
-        text.alignment = alignment;
-        text.color = Color.white;
-        text.raycastTarget = false;
-
-        // حدود سوداء للقراءة فوق أي لون في الحلبة
-        Outline outline = go.AddComponent<Outline>();
-        outline.effectColor = new Color(0f, 0f, 0f, 0.85f);
-        outline.effectDistance = new Vector2(2f, -2f);
-
-        return text;
+        // زر الإيقاف المؤقت (المرحلة 4) - أعلى يمين الشاشة
+        UiKit.MakeButton(canvasGO.transform, "BtnPause", "II",
+            new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-30f, -30f), new Vector2(100f, 100f),
+            new Color(0f, 0f, 0f, 0.45f), Color.white, 46,
+            () => { if (RaceFlow.Instance != null) RaceFlow.Instance.PauseRace(); },
+            FontStyle.Bold);
     }
 
     void Update()
     {
+        RaceFlow rf = RaceFlow.Instance;
+        if (rf == null) return;
+
+        // إدارة الظهور حسب حالة السباق (فحص رخيص مع كاش)
+        bool show = rf.State == RaceState.Racing ||
+                    rf.State == RaceState.Paused ||
+                    rf.State == RaceState.Countdown;
+        if (show != hudShown)
+        {
+            hudShown = show;
+            if (canvasGO != null) canvasGO.SetActive(show);
+        }
+        if (!show) return;
+
+        // العد التنازلي ووميض GO!
+        if (rf.State == RaceState.Countdown)
+            countdownText.text = Mathf.CeilToInt(Mathf.Max(0f, rf.CountdownRemaining)).ToString();
+        else if (rf.State == RaceState.Racing && Time.time < rf.GoFlashUntil)
+            countdownText.text = "GO!";
+        else
+            countdownText.text = "";
+
         LapManager lm = LapManager.Instance;
         if (lm == null) return;
 
-        lapText.text  = "LAP " + (lm.LapsCompleted + 1);
-        timeText.text = FormatTime(lm.CurrentLapTime);
-        bestText.text = "BEST " + FormatTime(lm.BestLapTime);
-        lastText.text = lm.LastLapTime > 0f ? "LAST " + FormatTime(lm.LastLapTime) : "";
-    }
-
-    static string FormatTime(float t)
-    {
-        if (t <= 0f) return "--:--.---";
-
-        int ms = Mathf.RoundToInt(t * 1000f);
-        int minutes = ms / 60000; ms -= minutes * 60000;
-        int seconds = ms / 1000;  ms -= seconds * 1000;
-        return $"{minutes:00}:{seconds:00}.{ms:000}";
+        lapText.text = "LAP " + Mathf.Min(lm.LapsCompleted + 1, RaceFlow.LapsPerRace) +
+                       "/" + RaceFlow.LapsPerRace;
+        timeText.text = UiKit.FormatTime(lm.CurrentLapTime);
+        bestText.text = "BEST " + UiKit.FormatTime(lm.BestLapTime);
+        lastText.text = lm.LastLapTime > 0f ? "LAST " + UiKit.FormatTime(lm.LastLapTime) : "";
     }
 }

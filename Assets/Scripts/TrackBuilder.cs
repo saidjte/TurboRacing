@@ -21,6 +21,11 @@ public class TrackBuilder : MonoBehaviour
     public Vector3 StartPosition { get; private set; }
     public float StartRotationZ { get; private set; }
 
+    // --- أبعاد عالمية للكاميرا (وضع القائمة في المرحلة 4) ---
+    public Vector3 MapCenter { get; private set; }
+    public float MapWidthUnits { get; private set; }
+    public float MapHeightUnits { get; private set; }
+
     /// <summary>
     /// بوابات اللفة (المرحلة 3): محور + مستوى عبور + نطاق على المحور الآخر + اتجاه.
     /// axis: 0 = X ، 1 = Y. dir: +1/-1 اتجاه العبور الصحيح (عكس عقارب الساعة).
@@ -71,6 +76,11 @@ public class TrackBuilder : MonoBehaviour
         Paint(map);
         ComputeStartPose();
         BuildLapGates();
+
+        // أبعاد عالمية (المرحلة 4: كاميرا القائمة)
+        MapWidthUnits = W * tileSize;
+        MapHeightUnits = H * tileSize;
+        MapCenter = new Vector3(MapWidthUnits * 0.5f, MapHeightUnits * 0.5f, 0f);
 
         Debug.Log($"[TrackBuilder] الحلبة جاهزة: {W}×{H} بلاطة، انطلاق من {StartPosition}");
     }

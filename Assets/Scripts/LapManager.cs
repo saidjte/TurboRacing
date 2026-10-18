@@ -1,12 +1,17 @@
 using UnityEngine;
+using System.Collections.Generic;
 
 /// <summary>
-/// TurboRacing - المرحلة 3
+/// TurboRacing - المرحلة 3 (مطوّرة في المرحلة 4)
 /// عداد اللفات + المؤقت + الحفظ:
 /// - 3 نقاط تفتيش إلزامية (يمين، أعلى، يسار) ثم خط النهاية = لفة صحيحة
 ///   (منع الغش: قطع الطريق عبر العشب لا يحتسب النقطة لأن نطاق كل بوابة مقيّد بعرض الطريق)
 /// - المؤقت يبدأ فعلياً عند أول عبور لخط النهاية باتجاه السباق
 /// - أفضل لفة تُحفظ في PlayerPrefs (تبقى بين الجلسات) + إحصاء إجمالي اللفات
+/// جديد في المرحلة 4:
+/// - السباق = LapsPerRace لفة (3) وعند إكمالها يُبلغ RaceFlow لإظهار النتائج
+/// - تسجيل أزمنة كل لفات السباق (LapTimes) لإظهارها في شاشة النتائج
+/// - ResetRace لإعادة الضبط الكامل عند البدء/الإعادة + حارس حالة (العد أثناء Racing فقط)
 /// </summary>
 public class LapManager : MonoBehaviour
 {
@@ -29,6 +34,16 @@ public class LapManager : MonoBehaviour
     public float BestLapTime { get; private set; }
     public int TotalLapsAllTime { get; private set; }
     public bool Timing => timing;
+
+    // --- جديد في المرحلة 4 ---
+    /// <summary>أزمنة لفات السباق الحالي (تُصفّر مع ResetRace).</summary>
+    public List<float> LapTimes { get; } = new List<float>();
+
+    /// <summary>قيمة أفضل لفة قبل بدء السباق الحالي (لكشف الرقم القياسي الجديد في النتائج).</summary>
+    public float BestAtRaceStart { get; private set; }
+
+    /// <summary>يُطلق عند إكمال LapsPerRace لفة صحيحة (خطاف للصوت/المؤثرات لاحقاً).</summary>
+    public event System.Action RaceFinished;
 
     void Awake()
     {
@@ -56,11 +71,41 @@ public class LapManager : MonoBehaviour
         prevY = carRb.position.y;
     }
 
+    /// <summary>
+    /// إعادة ضبط كامل لعدّاد السباق (المرحلة 4).
+    /// استدعِها بعد إعادة تموضع السيارة لأنها تحاذي prev مع الموضع الجديد
+    /// (منع عبور وهمي للبوابات بعد الانتقال الفوري).
+    /// </summary>
+    public void ResetRace()
+    {
+        progress = 0;
+        timing = false;
+        lapStartTime = 0f;
+        LapsCompleted = 0;
+        LastLapTime = 0f;
+        LapTimes.Clear();
+        BestAtRaceStart = BestLapTime;
+
+        if (carRb != null)
+        {
+            prevX = carRb.position.x;
+            prevY = carRb.position.y;
+        }
+    }
+
     void FixedUpdate()
     {
         if (carRb == null || track == null || track.LapGates == null) return;
 
         Vector2 p = carRb.position;
+
+        // المرحلة 4: العد يعمل أثناء السباق الفعلي فقط
+        if (RaceFlow.Instance != null && RaceFlow.Instance.State != RaceState.Racing)
+        {
+            prevX = p.x;
+            prevY = p.y;
+            return;
+        }
 
         // 1) بوابة نقطة التفتيش التالية (إن وجدت)
         if (progress < 3)
@@ -103,6 +148,7 @@ public class LapManager : MonoBehaviour
             lapStartTime = Time.time;
             LastLapTime = lapTime;
             LapsCompleted++;
+            LapTimes.Add(lapTime);
 
             if (BestLapTime <= 0f || lapTime < BestLapTime)
             {
@@ -115,6 +161,13 @@ public class LapManager : MonoBehaviour
             PlayerPrefs.Save(); // حفظ فوري (مقاوم لإغلاق التطبيق)
 
             Debug.Log($"[LapManager] لفة {LapsCompleted}: {lapTime:F3} ث | الأفضل: {BestLapTime:F3} ث");
+
+            // المرحلة 4: إكمال عدد لفات السباق → شاشة النتائج
+            if (LapsCompleted >= RaceFlow.LapsPerRace && RaceFlow.Instance != null)
+            {
+                RaceFlow.Instance.NotifyRaceFinished();
+                RaceFinished?.Invoke();
+            }
         }
         else if (!timing)
         {

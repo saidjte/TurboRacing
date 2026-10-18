@@ -1,9 +1,10 @@
 using UnityEngine;
 
 /// <summary>
-/// TurboRacing - المرحلة 1
+/// TurboRacing - المرحلة 1 (مطوّرة في المرحلة 4)
 /// كاميرا تتبع السيارة بسلاسة مع توقع بسيط لاتجاه الحركة (Look-Ahead).
-/// تربط نفسها تلقائياً بالسيارة عبر البحث عن الاسم "Car".
+/// وضع جديد في المرحلة 4: وضع القائمة (Overview) يؤطر الحلبة كاملة
+/// بدل تتبع السيارة - يستخدمه RaceFlow في القائمة الرئيسية.
 /// </summary>
 public class CameraFollow : MonoBehaviour
 {
@@ -22,9 +23,15 @@ public class CameraFollow : MonoBehaviour
     private Transform target;
     private Rigidbody2D targetRb;
     private Vector3 currentVelocity;
+    private Camera cam;
+    private float followSize = 7f;
+    private bool inOverview;
 
     void Start()
     {
+        cam = GetComponent<Camera>();
+        if (cam != null) followSize = cam.orthographicSize;
+
         GameObject car = GameObject.Find("Car");
         if (car != null)
         {
@@ -41,8 +48,38 @@ public class CameraFollow : MonoBehaviour
             transform.position = new Vector3(target.position.x, target.position.y, cameraZ);
     }
 
+    /// <summary>
+    /// تبديل بين تتبع السيارة (false) وتأطير الحلبة كاملة (true - وضع القائمة).
+    /// عند العودة للتتبع: تقريب فوري فوق السيارة دون انزلاق عبر الحلبة.
+    /// </summary>
+    public void SetOverviewMode(bool overview)
+    {
+        inOverview = overview;
+
+        if (!overview && target != null)
+        {
+            transform.position = new Vector3(target.position.x, target.position.y, cameraZ);
+            currentVelocity = Vector3.zero;
+        }
+    }
+
     void LateUpdate()
     {
+        // وضع القائمة: ثبات على مركز الحلبة مع ملاءمة الإطار لنسبة الشاشة
+        if (inOverview)
+        {
+            TrackBuilder tb = TrackBuilder.Instance;
+            if (tb == null || cam == null) return;
+
+            float needHeight = tb.MapHeightUnits * 0.55f;
+            float needWidth = tb.MapWidthUnits / (2f * Mathf.Max(0.8f, cam.aspect)) * 1.02f;
+            cam.orthographicSize = Mathf.Max(needHeight, needWidth);
+
+            transform.position = new Vector3(tb.MapCenter.x, tb.MapCenter.y, cameraZ);
+            return;
+        }
+
+        if (cam != null) cam.orthographicSize = followSize;
         if (target == null) return;
 
         Vector3 goal = target.position;

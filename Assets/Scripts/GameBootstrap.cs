@@ -24,8 +24,10 @@ public class GameBootstrap : MonoBehaviour
         CreateCar();
         CreateCanvasAndButtons();
         CreateHUD();            // المرحلة 3: عداد اللفات والمؤقت
+        CreateMenus();          // المرحلة 4: القائمة الرئيسية + النتائج + الإيقاف المؤقت
         CreateEventSystem();
         SetupCamera();
+        CreateRaceFlow();       // المرحلة 4: آلة حالات السباق (أخيراً حتى يجد كل شيء)
     }
 
     // ================= السيارة =================
@@ -75,6 +77,21 @@ public class GameBootstrap : MonoBehaviour
     {
         // RaceHUD يبني كانفاسه الخاص في Start (عرض فقط، لا يمس أزرار القيادة)
         new GameObject("RaceHUD").AddComponent<RaceHUD>();
+    }
+
+    // ================= واجهات القوائم (المرحلة 4) =================
+
+    void CreateMenus()
+    {
+        new GameObject("MenuUI").AddComponent<MenuUI>();       // القائمة الرئيسية (ترتيب 40)
+        new GameObject("ResultsUI").AddComponent<ResultsUI>(); // شاشة النتائج (ترتيب 30)
+        new GameObject("PauseUI").AddComponent<PauseUI>();     // الإيقاف المؤقت (ترتيب 20)
+    }
+
+    void CreateRaceFlow()
+    {
+        // يُنشأ أخيراً: Start الخاص به يعمل بعد جاهزية كل المكونات ويفتح القائمة
+        new GameObject("RaceFlow").AddComponent<RaceFlow>();
     }
 
     // ================= الكاميرا =================
