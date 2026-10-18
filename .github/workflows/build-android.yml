@@ -37,26 +37,31 @@ jobs:
       # without uninstalling. (Relaying on unity-builder env vars was not
       # enough with a custom buildMethod - the run came out signed with a
       # random debug key - so we sign explicitly here.)
-      - name: Zipalign and sign APK (stable release key)
+      - name: Sign APK with stable release key
         env:
           KS_B64: ${{ secrets.ANDROID_KEYSTORE_FILE }}
           KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS_NAME }}
           KS_ALIAS_PASS: ${{ secrets.ANDROID_KEY_ALIAS_PASSWORD }}
         run: |
-          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/turboracing.keystore"
-          BT=$(ls -d "$ANDROID_HOME"/build-tools/* 2>/dev/null | sort -V | tail -1)
+          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/game.keystore"
+          BT=""
+          for v in 35.0.0 34.0.0 36.0.0 33.0.2 33.0.1; do
+            if [ -x "$ANDROID_HOME/build-tools/$v/apksigner" ]; then BT="$ANDROID_HOME/build-tools/$v"; break; fi
+          done
+          if [ -z "$BT" ]; then BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1); fi
           echo "Using build-tools: $BT"
           APK=$(ls build/Android/*.apk | head -1)
-          "$BT/zipalign" -f 4 "$APK" "$APK.aligned"
+          ls -la build/Android/
+          # AGP output is already zipaligned; apksigner re-signs in place
+          # (replaces any existing debug signature) while preserving alignment
           "$BT/apksigner" sign \
-            --ks "$RUNNER_TEMP/turboracing.keystore" \
+            --ks "$RUNNER_TEMP/game.keystore" \
             --ks-key-alias "$KS_ALIAS" \
             --ks-pass "pass:$KS_PASS" \
             --key-pass "pass:$KS_ALIAS_PASS" \
-            --out "$APK.signed" "$APK.aligned"
+            --out "$APK.signed" "$APK"
           mv "$APK.signed" "$APK"
-          rm -f "$APK.aligned"
           "$BT/apksigner" verify --print-certs "$APK" | head -5
 
       - name: Upload APK artifact
