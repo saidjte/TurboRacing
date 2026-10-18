@@ -78,8 +78,8 @@ public static class UiKit
         if (f == null) return;
         var sb = new System.Text.StringBuilder();
         for (int i = 32; i <= 126; i++) sb.Append((char)i);
-        try { f.requestCharactersInTexture(sb.ToString(), 48, FontStyle.Bold); } catch { }
-        try { f.requestCharactersInTexture(sb.ToString(), 48, FontStyle.Normal); } catch { }
+        try { f.RequestCharactersInTexture(sb.ToString(), 48, FontStyle.Bold); } catch { }
+        try { f.RequestCharactersInTexture(sb.ToString(), 48, FontStyle.Normal); } catch { }
     }
 
     // سبرايتات الأسهم المرسومة (مستقلة عن الخطوط)
