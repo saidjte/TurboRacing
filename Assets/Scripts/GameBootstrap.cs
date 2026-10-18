@@ -4,7 +4,7 @@ using UnityEngine.UI;
 
 /// <summary>
 /// يبني محتوى المشهد بالكود عند بدء اللعبة:
-/// السيارة + الأرضية + الكانفاس والأزرار اللمسية + نظام الأحداث + الكاميرا.
+/// الحلبة (Tilemap) + السيارة + الكانفاس والأزرار اللمسية + نظام الأحداث + الكاميرا.
 /// الهدف: مشروع يعمل دون أي إعداد يدوي في محرر Unity.
 /// </summary>
 public class GameBootstrap : MonoBehaviour
@@ -20,8 +20,8 @@ public class GameBootstrap : MonoBehaviour
         Screen.autorotateToPortraitUpsideDown = false;
         Screen.orientation = ScreenOrientation.AutoRotation;
 
+        CreateTrack();          // المرحلة 2: الحلبة أولاً حتى تنطلق السيارة من خط البداية
         CreateCar();
-        CreateGround();
         CreateCanvasAndButtons();
         CreateEventSystem();
         SetupCamera();
@@ -32,25 +32,39 @@ public class GameBootstrap : MonoBehaviour
     void CreateCar()
     {
         GameObject car = new GameObject("Car");
-        car.transform.position = Vector3.zero;
+
+        // الانطلاق من خط البداية على الحلبة (أو المركز احتياطياً)
+        if (TrackBuilder.Instance != null)
+        {
+            car.transform.position = TrackBuilder.Instance.StartPosition;
+            car.transform.rotation = Quaternion.Euler(0f, 0f, TrackBuilder.Instance.StartRotationZ);
+        }
+        else
+        {
+            car.transform.position = Vector3.zero;
+        }
+
         car.transform.localScale = new Vector3(1f, 2f, 1f);
 
         SpriteRenderer sr = car.AddComponent<SpriteRenderer>();
         sr.sprite = MakeSolidSprite(64);
         sr.color = new Color(0.85f, 0.2f, 0.2f, 1f); // أحمر
+        sr.sortingOrder = 10; // فوق بلاطات الحلبة
 
         car.AddComponent<Rigidbody2D>(); // CarController يضبط خصائصه في Awake
         BoxCollider2D box = car.AddComponent<BoxCollider2D>();
         box.size = new Vector2(1f, 1f); // يطابق حجم السبرايت (1x1 وحدة عالمية)
         car.AddComponent<CarController>();
+        car.AddComponent<SurfaceChecker>(); // المرحلة 2: عقاب العشب
     }
 
-    // ================= الأرضية المؤقتة =================
+    // ================= الحلبة (المرحلة 2) =================
 
-    void CreateGround()
+    void CreateTrack()
     {
-        GameObject ground = new GameObject("Ground");
-        ground.AddComponent<SimpleBackground>();
+        // TrackBuilder يبني الطبقات الثلاث (عشب/طريق/جدران) فوراً في Awake الخاص به
+        GameObject track = new GameObject("Track");
+        track.AddComponent<TrackBuilder>();
     }
 
     // ================= الكاميرا =================
@@ -65,6 +79,8 @@ public class GameBootstrap : MonoBehaviour
         {
             cam.orthographic = true;
             cam.orthographicSize = 7f;
+            cam.clearFlags = CameraClearFlags.SolidColor;
+            cam.backgroundColor = new Color(0.15f, 0.22f, 0.13f); // أخضر داكن خارج الحلبة
         }
         camGO.AddComponent<CameraFollow>();
     }
