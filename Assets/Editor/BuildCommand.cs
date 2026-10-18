@@ -8,12 +8,13 @@ using UnityEngine;
 /// <summary>
 /// أمر البناء المخصص لبيئة CI (GameCI).
 /// ينشئ المشهد برمجياً، يضبط إعدادات أندرويد، ثم يبني ملف APK.
+/// اسم الملف يحمل رقم النسخة وجوباً (GameVersion) — القاعدة: كل إصلاح/ترقية يرفع الرقم.
 /// يُستدعى عبر مدخل buildMethod: BuildCommand.PerformBuild في unity-builder@v4.
 /// </summary>
 public static class BuildCommand
 {
     private const string ScenePath = "Assets/Scenes/Game.unity";
-    private const string OutputPath = "build/Android/TurboRacing.apk";
+    private const string OutputPath = "build/Android/TurboRacing_v" + GameVersion.Number + ".apk";
 
     public static void PerformBuild()
     {
@@ -40,7 +41,8 @@ public static class BuildCommand
         PlayerSettings.companyName = "TurboRacing";
         PlayerSettings.productName = "TurboRacing";
         PlayerSettings.SetApplicationIdentifier(BuildTargetGroup.Android, "com.turboracing.game");
-        PlayerSettings.bundleVersion = "0.1.0";
+        PlayerSettings.bundleVersion = GameVersion.Number;              // نسخة مرئية في إعدادات النظام
+        PlayerSettings.Android.bundleVersionCode = GameVersion.Code;    // رمز متزايد للتحديثات
 
         // الوضع الأفقي فقط (يسار/يمين)
         PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;

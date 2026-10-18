@@ -21,6 +21,22 @@ public class TrackBuilder : MonoBehaviour
     public Vector3 StartPosition { get; private set; }
     public float StartRotationZ { get; private set; }
 
+    /// <summary>
+    /// بوابات اللفة (المرحلة 3): محور + مستوى عبور + نطاق على المحور الآخر + اتجاه.
+    /// axis: 0 = X ، 1 = Y. dir: +1/-1 اتجاه العبور الصحيح (عكس عقارب الساعة).
+    /// [0..2] نقاط تفتيش إلزامية، [3] خط النهاية.
+    /// </summary>
+    public struct LapGate
+    {
+        public int axis;
+        public float plane;
+        public float spanMin;
+        public float spanMax;
+        public int dir;
+    }
+
+    public LapGate[] LapGates { get; private set; }
+
     // --- أبعاد خريطة الحلبة بالبلاطات ---
     const int W = 46;
     const int H = 28;
@@ -54,6 +70,7 @@ public class TrackBuilder : MonoBehaviour
 
         Paint(map);
         ComputeStartPose();
+        BuildLapGates();
 
         Debug.Log($"[TrackBuilder] الحلبة جاهزة: {W}×{H} بلاطة، انطلاق من {StartPosition}");
     }
@@ -207,6 +224,24 @@ public class TrackBuilder : MonoBehaviour
 
         StartPosition = new Vector3(startX, startY, 0f);
         StartRotationZ = -90f; // transform.up يشير نحو +X => انطلاق نحو خط البداية (عكس عقارب الساعة)
+    }
+
+    /// <summary>
+    /// بوابات اللفة بإحداثيات عالمية (كل البوابات منتصف المستقيم بعيداً عن الأركان):
+    /// [0] يمين: عبور Y=24 صعوداً على أيمن المستقيم الأيمن (X من 77 إلى 87)
+    /// [1] أعلى: عبور X=48 يساراً وسط المستقيم العلوي (Y من 3 إلى 13)
+    /// [2] يسار: عبور Y=24 هبوطاً على أيمن المستقيم الأيسر (X من 5 إلى 15)
+    /// [3] نهاية: عبور X=62 يميناً وسط خط البداية المقلّم (Y من 43.5 إلى 52.5)
+    /// </summary>
+    void BuildLapGates()
+    {
+        LapGates = new[]
+        {
+            new LapGate { axis = 1, plane = 24f, spanMin = 77f,   spanMax = 87f,   dir = +1 },
+            new LapGate { axis = 0, plane = 48f, spanMin = 3f,    spanMax = 13f,   dir = -1 },
+            new LapGate { axis = 1, plane = 24f, spanMin = 5f,    spanMax = 15f,   dir = -1 },
+            new LapGate { axis = 0, plane = 62f, spanMin = 43.5f, spanMax = 52.5f, dir = +1 }
+        };
     }
 
     // ================= استعلام السطح (لعقاب العشب) =================

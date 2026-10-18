@@ -23,6 +23,7 @@ public class GameBootstrap : MonoBehaviour
         CreateTrack();          // المرحلة 2: الحلبة أولاً حتى تنطلق السيارة من خط البداية
         CreateCar();
         CreateCanvasAndButtons();
+        CreateHUD();            // المرحلة 3: عداد اللفات والمؤقت
         CreateEventSystem();
         SetupCamera();
     }
@@ -65,6 +66,15 @@ public class GameBootstrap : MonoBehaviour
         // TrackBuilder يبني الطبقات الثلاث (عشب/طريق/جدران) فوراً في Awake الخاص به
         GameObject track = new GameObject("Track");
         track.AddComponent<TrackBuilder>();
+        track.AddComponent<LapManager>(); // المرحلة 3: بوابات اللفة والتوقيت والحفظ
+    }
+
+    // ================= واجهة السباق (المرحلة 3) =================
+
+    void CreateHUD()
+    {
+        // RaceHUD يبني كانفاسه الخاص في Start (عرض فقط، لا يمس أزرار القيادة)
+        new GameObject("RaceHUD").AddComponent<RaceHUD>();
     }
 
     // ================= الكاميرا =================
