@@ -439,8 +439,7 @@ public class CarController : MonoBehaviour
         // من بقايا لمسات قديمة بعد إعادة السباق أو العودة للقائمة
         foreach (KeyValuePair<string, HashSet<int>> kv in holdPointers)
             kv.Value.Clear();
-        foreach (KeyValuePair<string, bool> kv in holdEngaged)
-            kv.Value = false;
+        holdEngaged.Clear(); // RefreshHold يتعامل مع المفقود كغير منشّط افتراضياً
 
         foreach (KeyValuePair<string, Image> kv in driveButtons)
         {
