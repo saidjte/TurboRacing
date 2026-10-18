@@ -153,6 +153,11 @@ public class RaceFlow : MonoBehaviour
     {
         if (car == null || TrackBuilder.Instance == null) return;
 
+        // تصفير مدخلات القيادة القديمة (v0.6.0): لا توجيه/فرامل عالقة عند
+        // بدء سباق جديد أو العودة للقائمة إذا بقي إصبع اللاعب على زر سابق
+        CarController carCtrl = car.GetComponent<CarController>();
+        if (carCtrl != null) carCtrl.ResetInput();
+
         Vector3 pos = TrackBuilder.Instance.StartPosition;
         float rot = TrackBuilder.Instance.StartRotationZ;
 

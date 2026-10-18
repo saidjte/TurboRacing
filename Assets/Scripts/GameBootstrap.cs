@@ -130,18 +130,25 @@ public class GameBootstrap : MonoBehaviour
 
         RectTransform canvasRT = canvasGO.GetComponent<RectTransform>();
 
-        // القيم مطابقة تماماً لقيم المرحلة 1 في المحرر
+        // التخطيط القياسي لألعاب السباق بالتسارع التلقائي (v0.6.0):
+        // - زرا التوجيه مجمّعان معاً أسفل اليسار (إبهام أيسر واحد يوجه)
+        // - زر الفرامل كبير أسفل اليمين (إبهام أيمن يفرمل) - بعيداً عن منتصف الشاشة
+        //   حيث تظهر السيارة مع كاميرا المطاردة، وبمسافة مريحة من حواف الجهاز
+        //   (القياسات بوحدات كانفاس 1920×1080 مع مطابقة الارتفاع)
+
+        // اليسار: زرا التوجيه جنباً إلى جنب
         CreateButton(canvasRT, "BtnLeft",
-            new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(0f, 0f),
-            new Vector2(40f, 40f), new Vector2(280f, 280f));
+            new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(0.5f, 0.5f),
+            new Vector2(250f, 240f), new Vector2(300f, 300f));
 
         CreateButton(canvasRT, "BtnRight",
-            new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(1f, 0f),
-            new Vector2(-40f, 40f), new Vector2(280f, 280f));
+            new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(0.5f, 0.5f),
+            new Vector2(580f, 240f), new Vector2(300f, 300f));
 
+        // اليمين: الفرامل (أكبر حجماً لسهولة الوصول)
         CreateButton(canvasRT, "BtnBrake",
-            new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
-            new Vector2(0f, 40f), new Vector2(240f, 240f));
+            new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(0.5f, 0.5f),
+            new Vector2(-250f, 240f), new Vector2(340f, 340f));
     }
 
     void CreateButton(RectTransform parent, string name,

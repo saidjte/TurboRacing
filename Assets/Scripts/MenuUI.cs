@@ -90,8 +90,8 @@ public class MenuUI : MonoBehaviour
             56, TextAnchor.MiddleCenter, UiKit.Amber, FontStyle.Bold).text = "HOW TO PLAY";
 
         string body =
-            "The car accelerates on its own - hold < or > to steer\n" +
-            "BRK brakes. Keep holding it to reverse out of tight spots\n" +
+            "The car accelerates on its own - hold < or > (bottom left) to steer\n" +
+            "BRK (bottom right) brakes. Keep holding it to reverse out of tight spots\n" +
             "Finish 3 laps to complete the race\n" +
             "Grass slows you down to 45% speed\n" +
             "Checkpoints will NOT count if you cut across the grass\n" +

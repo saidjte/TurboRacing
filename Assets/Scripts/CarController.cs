@@ -1,12 +1,14 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 /// <summary>
-/// TurboRacing - المرحلة 1
+/// TurboRacing - v0.6.0
 /// التحكم في السيارة بفيزياء Rigidbody2D (بدون جاذبية - Gravity Scale = 0):
 /// - تسارع تلقائي دائم (أسلوب ألعاب الموبايل الشهيرة)
-/// - زران للتوجيه (يسار/يمين) + زر فرامل (يرجع للخلف عند التوقف الكامل)
+/// - التخطيط القياسي: زرا توجيه مجمّعان أسفل اليسار + زر فرامل كبير أسفل اليمين
+/// - أزرار محصّنة ضد الالتصاق (PointerDown/Up/Exit) مع تغذية بصرية عند الضغط
 /// - السكربت يضبط نفسه ذاتياً: يبحث عن الأزرار بالاسم ويربطها في Start()
 /// </summary>
 [RequireComponent(typeof(Rigidbody2D))]
@@ -40,6 +42,17 @@ public class CarController : MonoBehaviour
     private bool holdingRight;
     private bool holdingBrake;
 
+    // --- التغذية البصرية للأزرار (v0.6.0) ---
+    // لون ثابت عند السكون ولون مميز أثناء الضغط حتى يعرف اللاعب أن اللمس سُجّل
+    private static readonly Color SteerBaseColor    = new Color(0f, 0f, 0f, 0.35f);        // أسود شبه شفاف
+    private static readonly Color SteerPressedColor = new Color(1f, 0.72f, 0.15f, 0.80f);  // عنبري (هوية اللعبة)
+    private static readonly Color BrakeBaseColor    = new Color(0.62f, 0.10f, 0.10f, 0.55f); // أحمر داكن
+    private static readonly Color BrakePressedColor = new Color(1f, 0.25f, 0.18f, 0.90f);  // أحمر ساطع
+
+    private readonly Dictionary<string, Image> driveButtons = new Dictionary<string, Image>();
+    private readonly Dictionary<string, Color> baseColors = new Dictionary<string, Color>();
+    private readonly Dictionary<string, Color> pressedColors = new Dictionary<string, Color>();
+
     private Rigidbody2D rb;
     private float currentMaxSpeed;
 
@@ -68,10 +81,10 @@ public class CarController : MonoBehaviour
         BindHoldButton("BtnRight", down => holdingRight = down);
         BindHoldButton("BtnBrake", down => holdingBrake = down);
 
-        // تنسيق الأزرار ونصوصها تلقائياً
-        ConfigureButton("BtnLeft",  "<");
-        ConfigureButton("BtnRight", ">");
-        ConfigureButton("BtnBrake", "BRK");
+        // تنسيق الأزرار ونصوصها وألوانها تلقائياً
+        ConfigureButton("BtnLeft",  "<",   SteerBaseColor, SteerPressedColor);
+        ConfigureButton("BtnRight", ">",   SteerBaseColor, SteerPressedColor);
+        ConfigureButton("BtnBrake", "BRK", BrakeBaseColor, BrakePressedColor);
     }
 
     void Update()
@@ -183,8 +196,14 @@ public class CarController : MonoBehaviour
         if (trigger == null) trigger = buttonGO.AddComponent<EventTrigger>();
 
         // PointerDown = بدء الضغط ، PointerUp = ترك الضغط (يدعم اللمس المتعدد)
-        AddTriggerEntry(trigger, EventTriggerType.PointerDown, () => onStateChanged(true));
-        AddTriggerEntry(trigger, EventTriggerType.PointerUp,   () => onStateChanged(false));
+        // PointerExit = تحرير الزر عند انزلاق الإصبع خارجه (إصلاح التصاق الأزرار:
+        // بدونها تبقى السيارة تلف وحدها إذا انزلق الإصبع قليلاً خارج حدود الزر)
+        AddTriggerEntry(trigger, EventTriggerType.PointerDown,
+            () => { onStateChanged(true);  SetPressedVisual(buttonName, true); });
+        AddTriggerEntry(trigger, EventTriggerType.PointerUp,
+            () => { onStateChanged(false); SetPressedVisual(buttonName, false); });
+        AddTriggerEntry(trigger, EventTriggerType.PointerExit,
+            () => { onStateChanged(false); SetPressedVisual(buttonName, false); });
     }
 
     void AddTriggerEntry(EventTrigger trigger, EventTriggerType type, System.Action action)
@@ -194,13 +213,19 @@ public class CarController : MonoBehaviour
         trigger.triggers.Add(entry);
     }
 
-    void ConfigureButton(string buttonName, string label)
+    void ConfigureButton(string buttonName, string label, Color baseColor, Color pressedColor)
     {
         GameObject buttonGO = GameObject.Find(buttonName);
         if (buttonGO == null) return;
 
         Image image = buttonGO.GetComponent<Image>();
-        if (image != null) image.color = new Color(0f, 0f, 0f, 0.35f); // أسود شبه شفاف
+        if (image != null)
+        {
+            image.color = baseColor;
+            driveButtons[buttonName] = image;
+            baseColors[buttonName] = baseColor;
+            pressedColors[buttonName] = pressedColor;
+        }
 
         Text text = buttonGO.GetComponentInChildren<Text>(true);
         if (text == null) return;
@@ -212,6 +237,39 @@ public class CarController : MonoBehaviour
 
         RectTransform rt = buttonGO.GetComponent<RectTransform>();
         if (rt != null) text.fontSize = Mathf.Max(24, Mathf.RoundToInt(rt.rect.height * 0.4f));
+    }
+
+    /// <summary>تبديل لون الزر بين السكون والضغط (تغذية بصرية فورية للاعب).</summary>
+    void SetPressedVisual(string buttonName, bool pressed)
+    {
+        Image image;
+        if (!driveButtons.TryGetValue(buttonName, out image) || image == null) return;
+
+        Color target;
+        if (pressed)
+        {
+            pressedColors.TryGetValue(buttonName, out target);
+        }
+        else
+        {
+            baseColors.TryGetValue(buttonName, out target);
+        }
+
+        image.color = target;
+    }
+
+    /// <summary>تصفير كل المدخلات والألوان (يستدعى عند بدء/إعادة السباق أو العودة للقائمة
+    /// حتى لا تبقى السيارة تتوجّه أو تفرمل بمعزل عن لمسات اللاعب القديمة).</summary>
+    public void ResetInput()
+    {
+        holdingLeft = holdingRight = holdingBrake = false;
+
+        foreach (KeyValuePair<string, Image> kv in driveButtons)
+        {
+            Color baseColor;
+            if (kv.Value != null && baseColors.TryGetValue(kv.Key, out baseColor))
+                kv.Value.color = baseColor;
+        }
     }
 
     // ================= واجهة للمراحل القادمة =================
