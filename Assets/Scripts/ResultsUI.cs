@@ -10,7 +10,7 @@ public class ResultsUI : MonoBehaviour
 {
     public static ResultsUI Instance { get; private set; }
 
-    GameObject root;
+    RectTransform root;      // الجذر لوحة كاملة (FullRect يعيد RectTransform)
     Text lapsText;
     Text summaryText;
     Text recordText;
@@ -24,7 +24,7 @@ public class ResultsUI : MonoBehaviour
 
     public void SetVisible(bool on)
     {
-        if (root != null) root.SetActive(on);
+        if (root != null) root.gameObject.SetActive(on);
     }
 
     void Build()

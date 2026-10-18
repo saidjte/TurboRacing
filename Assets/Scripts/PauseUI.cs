@@ -10,7 +10,7 @@ public class PauseUI : MonoBehaviour
 {
     public static PauseUI Instance { get; private set; }
 
-    GameObject root;
+    RectTransform root;      // الجذر لوحة كاملة (FullRect يعيد RectTransform)
 
     void Awake()
     {
@@ -21,7 +21,7 @@ public class PauseUI : MonoBehaviour
 
     public void SetVisible(bool on)
     {
-        if (root != null) root.SetActive(on);
+        if (root != null) root.gameObject.SetActive(on);
     }
 
     void Build()

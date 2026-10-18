@@ -10,7 +10,7 @@ public class MenuUI : MonoBehaviour
 {
     public static MenuUI Instance { get; private set; }
 
-    GameObject root;
+    RectTransform root;      // الجذر لوحة كاملة (FullRect يعيد RectTransform)
     GameObject howTo;
     Text statsText;
 
@@ -24,7 +24,7 @@ public class MenuUI : MonoBehaviour
     public void SetVisible(bool on)
     {
         if (root == null) return;
-        root.SetActive(on);
+        root.gameObject.SetActive(on);
         if (!on && howTo != null) howTo.SetActive(false);
     }
 
@@ -111,7 +111,7 @@ public class MenuUI : MonoBehaviour
     void Update()
     {
         // تحديث الإحصاءات المحفوظة عند ظهور القائمة فقط
-        if (root == null || !root.activeSelf || statsText == null) return;
+        if (root == null || !root.gameObject.activeSelf || statsText == null) return;
 
         LapManager lm = LapManager.Instance;
         if (lm == null) return;
