@@ -22,12 +22,24 @@ public class GameBootstrap : MonoBehaviour
 
         CreateTrack();          // المرحلة 2: الحلبة أولاً حتى تنطلق السيارة من خط البداية
         CreateCar();
+        CreateAudio();          // المرحلة 5 (v0.7.0): مدير الصوت الإجرائي + آثار الإطارات
         CreateCanvasAndButtons();
         CreateHUD();            // المرحلة 3: عداد اللفات والمؤقت
         CreateMenus();          // المرحلة 4: القائمة الرئيسية + النتائج + الإيقاف المؤقت
         CreateEventSystem();
         SetupCamera();
         CreateRaceFlow();       // المرحلة 4: آلة حالات السباق (أخيراً حتى يجد كل شيء)
+    }
+
+    // ================= الصوت والمؤثرات (المرحلة 5) =================
+
+    void CreateAudio()
+    {
+        // SoundManager يبني كل المقاطع إجرائياً في Awake ويجد السيارة في Start
+        new GameObject("SoundManager").AddComponent<SoundManager>();
+
+        // مخزون آثار الإطارات (علامات متلاشية خلف السيارة)
+        new GameObject("SkidMarks").AddComponent<SkidMarks>();
     }
 
     // ================= السيارة =================
@@ -110,6 +122,10 @@ public class GameBootstrap : MonoBehaviour
             cam.backgroundColor = new Color(0.15f, 0.22f, 0.13f); // أخضر داكن خارج الحلبة
         }
         camGO.AddComponent<CameraFollow>();
+
+        // (v0.7.0) مستمع صوتي واحد على الكاميرا — بلا لم يُسمع أي صوت مولّد
+        if (camGO.GetComponent<AudioListener>() == null)
+            camGO.AddComponent<AudioListener>();
     }
 
     // ================= الكانفاس والأزرار =================

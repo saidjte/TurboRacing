@@ -160,6 +160,12 @@ public static class UiKit
         btn.targetGraphic = img;
         if (onClick != null) btn.onClick.AddListener(onClick);
 
+        // (v0.7.0) نقرة موحّدة لكل أزرار الواجهة
+        btn.onClick.AddListener(() =>
+        {
+            if (SoundManager.Instance != null) SoundManager.Instance.PlayClick();
+        });
+
         float barW = size.x * 0.15f;
         float barH = size.y * 0.44f;
         float gap  = size.x * 0.11f;
@@ -282,6 +288,12 @@ public static class UiKit
         Button btn = go.GetComponent<Button>();
         btn.targetGraphic = img;
         if (onClick != null) btn.onClick.AddListener(onClick);
+
+        // (v0.7.0) نقرة موحّدة لكل أزرار الواجهة
+        btn.onClick.AddListener(() =>
+        {
+            if (SoundManager.Instance != null) SoundManager.Instance.PlayClick();
+        });
 
         // نص ممتد يملأ الزر
         // (v0.6.7) إصلاح جوهري: معامل label كان يُستقبل ولا يُسند أبداً —

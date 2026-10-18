@@ -77,6 +77,11 @@ public class CarController : MonoBehaviour
     public float SpeedKmh => rb.linearVelocity.magnitude * 3.6f;
     public bool IsBraking => holdingBrake;
 
+    /// <summary>(v0.7.0) السرعة الحالية نسبةً إلى الحد الأقصى (0..1) — يستخدمها الصوت والآثار.</summary>
+    public float Speed01 => rb != null
+        ? Mathf.Clamp01(rb.linearVelocity.magnitude / Mathf.Max(1f, currentMaxSpeed))
+        : 0f;
+
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
@@ -144,6 +149,34 @@ public class CarController : MonoBehaviour
         ApplySteering(steerInput);
         ApplyThrottleAndBrake();
         ApplyLateralGripAndSpeedClamp();
+
+        // (v0.7.0) آثار الإطارات: انعطاف حاد بسرعة أو فرملة قوية بسرعة
+        if (SkidMarks.Instance != null)
+        {
+            float forwardSpeedNow = Vector2.Dot(rb.linearVelocity, transform.up);
+            bool hardSteer = Mathf.Abs(steerInput) > 0.5f && forwardSpeedNow > 7f;
+            bool hardBrake = holdingBrake && forwardSpeedNow > 5f;
+            if (hardSteer || hardBrake)
+                SkidMarks.Instance.Drop(rb.position - (Vector2)(transform.up * 0.55f), rb.rotation);
+        }
+    }
+
+    /// <summary>
+    /// (v0.7.0) مؤثر التصادم: صوت ارتطام متدرّج القوة + اهتزاز كاميرا
+    /// حسب شدة الاصطدام (العتبة 2.5 م/ث لتجنب نقرات الملامسة العابرة).
+    /// </summary>
+    void OnCollisionEnter2D(Collision2D collision)
+    {
+        float impact = collision.relativeVelocity.magnitude;
+        if (impact < 2.5f) return;
+
+        float impact01 = Mathf.Clamp01((impact - 2.5f) / 10f);
+
+        if (SoundManager.Instance != null)
+            SoundManager.Instance.PlayCrash(impact01);
+
+        if (CameraFollow.Instance != null)
+            CameraFollow.Instance.Shake(Mathf.Lerp(0.08f, 0.3f, impact01));
     }
 
     // ================= الفيزياء =================

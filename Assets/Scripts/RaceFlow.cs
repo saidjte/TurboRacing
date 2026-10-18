@@ -24,6 +24,8 @@ public class RaceFlow : MonoBehaviour
     /// <summary>آخر لحظة لإظهار وميض GO! بعد الانطلاق.</summary>
     public float GoFlashUntil { get; private set; }
 
+    int lastBeepSecond; // (v0.7.0) آخر ثانية عُزفت لها نقرة عد تنازلي
+
     GameObject car;
     Rigidbody2D carRb;
     GameObject gameCanvas;   // أزرار القيادة اللمسية
@@ -50,11 +52,28 @@ public class RaceFlow : MonoBehaviour
         if (State == RaceState.Countdown)
         {
             CountdownRemaining -= Time.deltaTime;
+
+            // (v0.7.0) نقرة عند كل ثانية من العد (3..2..1)
+            int sec = Mathf.CeilToInt(Mathf.Max(0f, CountdownRemaining));
+            if (sec != lastBeepSecond)
+            {
+                lastBeepSecond = sec;
+                if (sec >= 1 && sec <= 3 && SoundManager.Instance != null)
+                    SoundManager.Instance.PlayCountBeep();
+            }
+
             if (CountdownRemaining <= 0f)
             {
                 State = RaceState.Racing;
                 GoFlashUntil = Time.time + 0.9f;
                 SetCarFrozen(false);
+
+                // (v0.7.0) نغمة GO + تحويل المحرك من الخمول إلى القيادة
+                if (SoundManager.Instance != null)
+                {
+                    SoundManager.Instance.PlayGo();
+                    SoundManager.Instance.EngineDrive();
+                }
             }
         }
 
@@ -80,9 +99,17 @@ public class RaceFlow : MonoBehaviour
         SetGameCanvas(true);
 
         CountdownRemaining = 3f;
+        lastBeepSecond = 3;
         State = RaceState.Countdown;
         SetCarFrozen(true);
         SetCameraMode(follow: true);
+
+        // (v0.7.0) نقرة الثانية الأولى + خمول المحرك أثناء العد
+        if (SoundManager.Instance != null)
+        {
+            SoundManager.Instance.PlayCountBeep();
+            SoundManager.Instance.EngineIdle();
+        }
     }
 
     /// <summary>إيقاف مؤقت أثناء السباق (تجميد الزمن والفيزياء).</summary>
@@ -93,6 +120,9 @@ public class RaceFlow : MonoBehaviour
         State = RaceState.Paused;
         Time.timeScale = 0f; // يجمد الفيزياء ومؤقت اللفة معاً
         if (PauseUI.Instance != null) PauseUI.Instance.SetVisible(true);
+
+        // (v0.7.0) الصوت لا يتأثر بـ timeScale — نسكته صراحة أثناء الوقفة
+        if (SoundManager.Instance != null) SoundManager.Instance.EngineSilent();
     }
 
     /// <summary>استئناف السباق من نقطة التوقف.</summary>
@@ -103,6 +133,9 @@ public class RaceFlow : MonoBehaviour
         Time.timeScale = 1f;
         if (PauseUI.Instance != null) PauseUI.Instance.SetVisible(false);
         State = RaceState.Racing;
+
+        // (v0.7.0) إعادة تشغيل صوت المحرك بعد الاستئناف
+        if (SoundManager.Instance != null) SoundManager.Instance.EngineDrive();
     }
 
     /// <summary>إعادة السباق من الصفر (من الإيقاف المؤقت أو شاشة النتائج).</summary>
@@ -128,6 +161,21 @@ public class RaceFlow : MonoBehaviour
         State = RaceState.Finished;
         SetCarFrozen(true);
         SetGameCanvas(false);
+
+        // (v0.7.0) صمت المحرك + فانفار النهاية أو رنة الرقم القياسي الجديد
+        if (SoundManager.Instance != null)
+        {
+            SoundManager.Instance.EngineSilent();
+
+            bool newRecord = LapManager.Instance != null &&
+                LapManager.Instance.BestLapTime > 0f &&
+                (LapManager.Instance.BestAtRaceStart <= 0f ||
+                 LapManager.Instance.BestLapTime < LapManager.Instance.BestAtRaceStart);
+
+            if (newRecord) SoundManager.Instance.PlayRecord();
+            else SoundManager.Instance.PlayFinish();
+        }
+
         if (ResultsUI.Instance != null) ResultsUI.Instance.Show();
     }
 
@@ -145,6 +193,9 @@ public class RaceFlow : MonoBehaviour
         SetGameCanvas(false);
         ShowGameplayUI(menu: true, results: false, pause: false);
         SetCameraMode(follow: false); // كاميرا القائمة: تأطير الحلبة كاملة
+
+        // (v0.7.0) صمت كامل في القائمة الرئيسية
+        if (SoundManager.Instance != null) SoundManager.Instance.EngineSilent();
     }
 
     // ================= مساعدات =================

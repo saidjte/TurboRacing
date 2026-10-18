@@ -162,6 +162,10 @@ public class LapManager : MonoBehaviour
 
             Debug.Log($"[LapManager] لفة {LapsCompleted}: {lapTime:F3} ث | الأفضل: {BestLapTime:F3} ث");
 
+            // (v0.7.0) رنة لفة مكتملة — ما عدا اللفة الأخيرة (لها فانفار/رقم قياسي من RaceFlow)
+            if (LapsCompleted < RaceFlow.LapsPerRace && SoundManager.Instance != null)
+                SoundManager.Instance.PlayLap();
+
             // المرحلة 4: إكمال عدد لفات السباق → شاشة النتائج
             if (LapsCompleted >= RaceFlow.LapsPerRace && RaceFlow.Instance != null)
             {

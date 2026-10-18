@@ -11,6 +11,9 @@ using UnityEngine;
 /// </summary>
 public class CameraFollow : MonoBehaviour
 {
+    /// <summary>(v0.7.0) مرجع ساكن لاستدعاء الاهتزاز من CarController.</summary>
+    public static CameraFollow Instance { get; private set; }
+
     [Header("وضع المطاردة (منظور الشخص الثالث)")]
     [Tooltip("تفعيل كاميرا المطاردة المائلة (false = متابعة علوية كلاسيكية)")]
     public bool thirdPerson = true;
@@ -56,6 +59,14 @@ public class CameraFollow : MonoBehaviour
     private float smoothYaw;
     private bool yawInit;
     private Vector3 legacyVel;
+
+    // (v0.7.0) اهتزاز التصادم: سعة حالية تتلاشى أُسّياً
+    private float shakeAmp;
+
+    void Awake()
+    {
+        Instance = this;
+    }
 
     void Start()
     {
@@ -153,6 +164,17 @@ public class CameraFollow : MonoBehaviour
             Vector3 forward = rot * Vector3.forward;
             Vector3 pos = smoothPivot - forward * chaseDistance;
 
+            // (v0.7.0) اهتزاز التصادم: إزاحة عشوائية صغيرة تتلاشى أُسّياً
+            if (shakeAmp > 0.001f)
+            {
+                pos += new Vector3(Random.Range(-1f, 1f), Random.Range(-1f, 1f), 0f) * shakeAmp;
+                shakeAmp *= Mathf.Exp(-6f * dt);
+            }
+            else
+            {
+                shakeAmp = 0f;
+            }
+
             transform.SetPositionAndRotation(pos, rot);
             return;
         }
@@ -173,5 +195,11 @@ public class CameraFollow : MonoBehaviour
 
         goal.z = cameraZ;
         transform.position = Vector3.SmoothDamp(transform.position, goal, ref legacyVel, smoothTime);
+    }
+
+    /// <summary>(v0.7.0) دفعة اهتزاز (تُستخدم أكبر قيمة إذا تزامنت دفعات).</summary>
+    public void Shake(float amp)
+    {
+        shakeAmp = Mathf.Max(shakeAmp, amp);
     }
 }
