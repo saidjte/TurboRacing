@@ -60,6 +60,10 @@ public class CameraFollow : MonoBehaviour
     private bool yawInit;
     private Vector3 legacyVel;
 
+    // (v0.8.0) إعدادات اللاعب: مسافة الكاميرا + اهتزاز التصادم
+    private float zoomMul = 1f;
+    private bool shakeEnabled = true;
+
     // (v0.7.0) اهتزاز التصادم: سعة حالية تتلاشى أُسّياً
     private float shakeAmp;
 
@@ -87,6 +91,23 @@ public class CameraFollow : MonoBehaviour
         // محاذاة فورية عند بداية المشهد
         if (target != null)
             transform.position = new Vector3(target.position.x, target.position.y, cameraZ);
+
+        // (v0.8.0) سحب إعدادات الكاميرا المحفوظة (نموذج السحب = لا مشاكل ترتيب)
+        GameSettings.EnsureLoaded();
+        ApplyZoom(GameSettings.CamZoom);
+        ApplyShake(GameSettings.CamShake);
+    }
+
+    /// <summary>(v0.8.0) مسافة الكاميرا من الإعدادات: 0.8 قريبة ← 1.3 بعيدة.</summary>
+    public void ApplyZoom(float zoom)
+    {
+        zoomMul = Mathf.Clamp(zoom, 0.6f, 1.6f);
+    }
+
+    /// <summary>(v0.8.0) تفعيل/تعطيل اهتزاز الكاميرا عند التصادم.</summary>
+    public void ApplyShake(bool enabled)
+    {
+        shakeEnabled = enabled;
     }
 
     /// <summary>
@@ -162,7 +183,7 @@ public class CameraFollow : MonoBehaviour
             // وبالتالي الكاميرا تقع خلف السيارة وعلى جهة المشاهد تماماً
             Quaternion rot = Quaternion.Euler(0f, 0f, smoothYaw) * Quaternion.Euler(-chasePitchDeg, 0f, 0f);
             Vector3 forward = rot * Vector3.forward;
-            Vector3 pos = smoothPivot - forward * chaseDistance;
+            Vector3 pos = smoothPivot - forward * (chaseDistance * zoomMul); // (v0.8.0) مسافة قابلة للضبط
 
             // (v0.7.0) اهتزاز التصادم: إزاحة عشوائية صغيرة تتلاشى أُسّياً
             if (shakeAmp > 0.001f)
@@ -180,7 +201,7 @@ public class CameraFollow : MonoBehaviour
         }
 
         // ================= احتياطي: متابعة علوية كلاسيكية =================
-        if (cam != null) cam.orthographicSize = followOrthoSize;
+        if (cam != null) cam.orthographicSize = followOrthoSize * zoomMul;
 
         Vector3 goal = target.position;
 
@@ -197,9 +218,11 @@ public class CameraFollow : MonoBehaviour
         transform.position = Vector3.SmoothDamp(transform.position, goal, ref legacyVel, smoothTime);
     }
 
-    /// <summary>(v0.7.0) دفعة اهتزاز (تُستخدم أكبر قيمة إذا تزامنت دفعات).</summary>
+    /// <summary>(v0.7.0) دفعة اهتزاز (تُستخدم أكبر قيمة إذا تزامنت دفعات).
+    /// (v0.8.0) احترام إعداد تعطيل الاهتزاز من صفحة الإعدادات.</summary>
     public void Shake(float amp)
     {
+        if (!shakeEnabled) return;
         shakeAmp = Mathf.Max(shakeAmp, amp);
     }
 }

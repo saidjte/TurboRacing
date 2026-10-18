@@ -22,15 +22,21 @@ public class SurfaceChecker : MonoBehaviour
 
     CarController car;
     SpriteRenderer sr;
-    float baseGrip;
     Color baseColor;
 
     void Awake()
     {
         car = GetComponent<CarController>();
-        sr = GetComponent<SpriteRenderer>();
-        baseGrip = car.lateralGrip;
+        // (v0.8.0) الرسم انتقل إلى الأبناء: CarBody (الهيكل الملوّن) + CarTrim (التفاصيل)
+        sr = GetComponentInChildren<SpriteRenderer>();
         if (sr != null) baseColor = sr.color;
+    }
+
+    /// <summary>(v0.8.0) تحديث اللون الأساس بعد تغيير طلاء السيارة من الإعدادات
+    /// (يُتجاهل أثناء التواجد على العشب حتى لا يُلتقط اللون المتلطّخ).</summary>
+    public void RefreshBaseColor()
+    {
+        if (sr != null && !OnGrass) baseColor = sr.color;
     }
 
     void FixedUpdate()
@@ -45,13 +51,13 @@ public class SurfaceChecker : MonoBehaviour
         if (grass)
         {
             car.SetSpeedLimit(grassSpeedMultiplier);
-            car.lateralGrip = baseGrip * grassGripMultiplier;
-            if (sr != null) sr.color = baseColor * 0.6f; // السيارة تبدو "متسخة"
+            car.SetGripOverride(grassGripMultiplier); // (v0.8.0) يُركَّب فوق تماسك مستوى الضبط
+            if (sr != null) sr.color = new Color(baseColor.r * 0.6f, baseColor.g * 0.6f, baseColor.b * 0.6f, 1f); // يبدو "متسخاً" (بلا شفافية)
         }
         else
         {
             car.RestoreSpeedLimit();
-            car.lateralGrip = baseGrip;
+            car.SetGripOverride(1f);
             if (sr != null) sr.color = baseColor;
         }
     }

@@ -312,6 +312,149 @@ public static class UiKit
         return btn;
     }
 
+    static Sprite cachedCircle;
+    static Sprite cachedClose;
+
+    /// <summary>دائرة بيضاء مرسومة (مقبض السلايدر وأيقونة التحديد) — v0.8.0.</summary>
+    public static Sprite CircleSprite()
+    {
+        if (cachedCircle != null) return cachedCircle;
+
+        const int N = 96;
+        Texture2D tex = new Texture2D(N, N, TextureFormat.RGBA32, false);
+        Color[] pixels = new Color[N * N];
+        float c = (N - 1) * 0.5f;
+        float r = N * 0.5f - 2f;
+
+        for (int y = 0; y < N; y++)
+        {
+            for (int x = 0; x < N; x++)
+            {
+                float dx = x - c, dy = y - c;
+                float d = Mathf.Sqrt(dx * dx + dy * dy);
+                float a = Mathf.Clamp01((r - d) / 1.5f); // حافة ناعمة
+                pixels[y * N + x] = new Color(1f, 1f, 1f, a);
+            }
+        }
+
+        tex.SetPixels(pixels);
+        tex.Apply(false, false);
+        cachedCircle = Sprite.Create(tex, new Rect(0, 0, N, N), new Vector2(0.5f, 0.5f), N);
+        cachedCircle.name = "Circle";
+        return cachedCircle;
+    }
+
+    /// <summary>علامة X بيضاء مرسومة (زر إغلاق الإعدادات) — v0.8.0.</summary>
+    public static Sprite CloseSprite()
+    {
+        if (cachedClose != null) return cachedClose;
+
+        const int N = 128;
+        Texture2D tex = new Texture2D(N, N, TextureFormat.RGBA32, false);
+        Color clear = new Color(0f, 0f, 0f, 0f);
+        Color[] pixels = new Color[N * N];
+        for (int i = 0; i < pixels.Length; i++) pixels[i] = clear;
+
+        float t = N * 0.075f; // سماكة الخط
+        for (int y = 0; y < N; y++)
+        {
+            for (int x = 0; x < N; x++)
+            {
+                float d1 = Mathf.Abs(x - y);                    // قطر \
+                float d2 = Mathf.Abs(x - (N - 1 - y));          // قطر /
+                if (d1 < t || d2 < t)
+                    pixels[y * N + x] = Color.white;
+            }
+        }
+
+        tex.SetPixels(pixels);
+        tex.Apply(false, false);
+        cachedClose = Sprite.Create(tex, new Rect(0, 0, N, N), new Vector2(0.5f, 0.5f), N);
+        cachedClose.name = "Close";
+        return cachedClose;
+    }
+
+    /// <summary>
+    /// سلايدر أفقي كامل البناء بالكود (v0.8.0): مسار شبه شفاف + تعبئة عنبرية + مقبض دائري أبيض.
+    /// المنطقة الملموسة = مستطيل السلايدر كاملاً (السحب من أي موضع يقفز بالمقبض إلى هناك).
+    /// </summary>
+    public static Slider MakeSlider(Transform parent, string name,
+        Vector2 anchor, Vector2 pivot, Vector2 pos, Vector2 size,
+        float min, float max, float value, UnityEngine.Events.UnityAction<float> onChange)
+    {
+        GameObject go = new GameObject(name,
+            typeof(RectTransform), typeof(CanvasRenderer), typeof(Slider));
+        go.transform.SetParent(parent, false);
+
+        RectTransform rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = anchor;
+        rt.anchorMax = anchor;
+        rt.pivot = pivot;
+        rt.anchoredPosition = pos;
+        rt.sizeDelta = size;
+
+        Color trackCol = new Color(1f, 1f, 1f, 0.16f);
+
+        // المسار (شريط رفيع بمنتصف السلايدر)
+        RectTransform track = MakePanel(go.transform, "Track",
+            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero,
+            new Vector2(size.x, 22f), trackCol, raycast: true);
+
+        // منطقة التعبئة (تمتد بعرض السلايدر بارتفاع المسار)
+        float barHalf = 11f;
+        GameObject fillArea = new GameObject("Fill Area", typeof(RectTransform));
+        fillArea.transform.SetParent(go.transform, false);
+        RectTransform fart = fillArea.GetComponent<RectTransform>();
+        fart.anchorMin = Vector2.zero;
+        fart.anchorMax = Vector2.one;
+        fart.offsetMin = new Vector2(0f, size.y * 0.5f - barHalf);
+        fart.offsetMax = new Vector2(0f, -(size.y * 0.5f - barHalf));
+
+        GameObject fill = new GameObject("Fill", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        fill.transform.SetParent(fart.transform, false);
+        RectTransform frt = fill.GetComponent<RectTransform>();
+        frt.anchorMin = Vector2.zero;
+        frt.anchorMax = new Vector2(0f, 1f); // السلايدر يحرك anchorMax.x
+        frt.offsetMin = Vector2.zero;
+        frt.offsetMax = Vector2.zero;
+        Image fillImg = fill.GetComponent<Image>();
+        fillImg.color = Amber;
+        fillImg.raycastTarget = true;
+
+        // منطقة المقبض
+        GameObject handleArea = new GameObject("Handle Slide Area", typeof(RectTransform));
+        handleArea.transform.SetParent(go.transform, false);
+        RectTransform hart = handleArea.GetComponent<RectTransform>();
+        hart.anchorMin = Vector2.zero;
+        hart.anchorMax = Vector2.one;
+        hart.offsetMin = Vector2.zero;
+        hart.offsetMax = Vector2.zero;
+
+        GameObject handle = new GameObject("Handle", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        handle.transform.SetParent(hart.transform, false);
+        RectTransform hrt = handle.GetComponent<RectTransform>();
+        hrt.anchorMin = new Vector2(0f, 0.5f); // السلايدر يحرك anchorMin/Max.x
+        hrt.anchorMax = new Vector2(0f, 0.5f);
+        hrt.pivot = new Vector2(0.5f, 0.5f);
+        hrt.sizeDelta = new Vector2(40f, 40f);
+        Image handleImg = handle.GetComponent<Image>();
+        handleImg.sprite = CircleSprite();
+        handleImg.color = Color.white;
+        handleImg.raycastTarget = true;
+
+        // تركيب السلايدر
+        Slider slider = go.GetComponent<Slider>();
+        slider.fillRect = frt;
+        slider.handleRect = hrt;
+        slider.targetGraphic = handleImg;
+        slider.minValue = min;
+        slider.maxValue = max;
+        slider.value = Mathf.Clamp(value, min, max);
+        if (onChange != null) slider.onValueChanged.AddListener(onChange);
+
+        return slider;
+    }
+
     /// <summary>تنسيق موحّد للوقت: mm:ss.mmm (أو شرطات عندما لا يوجد زمن).</summary>
     public static string FormatTime(float t)
     {

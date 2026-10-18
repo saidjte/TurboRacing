@@ -73,6 +73,13 @@ public class CarController : MonoBehaviour
     private Rigidbody2D rb;
     private float currentMaxSpeed;
 
+    // --- (v0.8.0) الضبط القابل للتخصيص ---
+    // قيم الأساس حسب مستوى الضبط المختار، ومضاعف العشب يركّب فوقها
+    private float baseGrip = 6f;      // تماسك المستوى الحالي (قبل عقاب العشب)
+    private float gripOverride = 1f;  // مضاعف العشب (1 = طبيعي)
+    private SpriteRenderer bodyRenderer;
+    private SurfaceChecker surface;
+
     // --- خصائص للقراءة من سكربتات أخرى (HUD في المراحل القادمة) ---
     public float SpeedKmh => rb.linearVelocity.magnitude * 3.6f;
     public bool IsBraking => holdingBrake;
@@ -122,6 +129,12 @@ public class CarController : MonoBehaviour
 
         // الفرامل: نص BRK (حروف أساسية متوفرة في كل الخطوط)
         ConfigureButton("BtnBrake", "BRK", BrakeBaseColor, BrakePressedColor);
+
+        // (v0.8.0) سحب إعدادات اللاعب: الضبط + اللون + تخطيط الأزرار
+        GameSettings.EnsureLoaded();
+        ApplyTuning(GameSettings.CarPreset, GameSettings.SteerSens);
+        SetBodyColor(GameSettings.CurrentColor);
+        DriveButtonsLayout.Apply(this);
     }
 
     void Update()
@@ -494,5 +507,91 @@ public class CarController : MonoBehaviour
     public void RestoreSpeedLimit()
     {
         currentMaxSpeed = maxSpeed;
+    }
+
+    // ================= الضبط القابل للتخصيص (v0.8.0) =================
+
+    /// <summary>
+    /// تطبيق مستوى ضبط الأداء + حساسية التوجيه من صفحة الإعدادات:
+    /// STOCK = التوازن الأصلي | SPORT = أسرع وألزق | TURBO = الأسرع مع انزلاق أكثر.
+    /// الحساسية مضاعف على سرعة الدوران فقط — بقية الفيزياء سليمة.
+    /// </summary>
+    public void ApplyTuning(int preset, float steerSens)
+    {
+        float pMax, pAcc, pTurn, pGrip;
+
+        switch (Mathf.Clamp(preset, 0, 2))
+        {
+            case 1: // SPORT
+                pMax = 15.5f; pAcc = 12f; pTurn = 235f; pGrip = 6.6f;
+                break;
+            case 2: // TURBO
+                pMax = 17f;  pAcc = 14f; pTurn = 245f; pGrip = 5.6f;
+                break;
+            default: // STOCK
+                pMax = 14f;  pAcc = 10f; pTurn = 220f; pGrip = 6f;
+                break;
+        }
+
+        maxSpeed = pMax;
+        acceleration = pAcc;
+        maxTurnSpeed = pTurn * Mathf.Clamp(steerSens, 0.5f, 2f);
+        baseGrip = pGrip;
+        lateralGrip = pGrip * gripOverride;
+
+        // إعادة حد السرعة (العشب يعيد فرض عقابه عند أول تغيير سطح تالٍ)
+        currentMaxSpeed = maxSpeed;
+    }
+
+    /// <summary>
+    /// (v0.8.0) مضاعف تماسك مؤقت من SurfaceChecker (العشب) — يُركَّب فوق
+    /// تماسك مستوى الضبط بدل الكتابة المباشرة على lateralGrip.
+    /// </summary>
+    public void SetGripOverride(float multiplier)
+    {
+        gripOverride = Mathf.Clamp(multiplier, 0.1f, 2f);
+        lateralGrip = baseGrip * gripOverride;
+    }
+
+    /// <summary>
+    /// (v0.8.0) لون طلاء السيارة: يغيّر لون طبقة الهيكل (التفاصيل ثابتة الألوان)
+    /// ويحدّث اللون الأساس لدى SurfaceChecker (تلطيخ العشب) عند عدم التواجد عليه.
+    /// </summary>
+    public void SetBodyColor(Color color)
+    {
+        if (bodyRenderer == null)
+        {
+            Transform t = transform.Find("CarBody");
+            if (t != null) bodyRenderer = t.GetComponent<SpriteRenderer>();
+        }
+        if (bodyRenderer != null) bodyRenderer.color = color;
+
+        if (surface == null) surface = GetComponent<SurfaceChecker>();
+        if (surface != null) surface.RefreshBaseColor();
+    }
+
+    /// <summary>
+    /// (v0.8.0) شفافية أزرار القيادة من الإعدادات: تحديث ألوان الأساس المخزنة
+    /// (تُستعاد عند كل إفلات إصبع) مع تطبيقها فوراً على الأزرار غير المضغوطة.
+    /// </summary>
+    public void ApplyButtonOpacity(float opacityMul)
+    {
+        float op = Mathf.Clamp01(opacityMul);
+        UpdateBaseColor("BtnLeft",  new Color(0f, 0f, 0f, 0.35f * op));
+        UpdateBaseColor("BtnRight", new Color(0f, 0f, 0f, 0.35f * op));
+        UpdateBaseColor("BtnBrake", new Color(0.62f, 0.10f, 0.10f, 0.55f * op));
+    }
+
+    void UpdateBaseColor(string buttonName, Color c)
+    {
+        baseColors[buttonName] = c;
+
+        bool engaged;
+        if (!holdEngaged.TryGetValue(buttonName, out engaged)) engaged = false;
+        if (engaged) return; // مضغوط الآن — الضغط يعرض لونه الخاص
+
+        Image image;
+        if (driveButtons.TryGetValue(buttonName, out image) && image != null)
+            image.color = c;
     }
 }

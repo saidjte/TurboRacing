@@ -51,12 +51,18 @@ public class MenuUI : MonoBehaviour
             () => { if (RaceFlow.Instance != null) RaceFlow.Instance.StartRace(); });
 
         UiKit.MakeButton(root, "BtnHowTo", "HOW TO PLAY",
-            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -195f), new Vector2(560f, 96f),
+            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -190f), new Vector2(560f, 88f),
             UiKit.BtnDark, UiKit.BtnLightText, 42,
             () => { if (howTo != null) howTo.SetActive(true); });
 
+        // (v0.8.0) زر الإعدادات المتقدمة
+        UiKit.MakeButton(root, "BtnSettings", "SETTINGS",
+            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -300f), new Vector2(560f, 88f),
+            UiKit.BtnDark, UiKit.BtnLightText, 42,
+            () => { if (SettingsUI.Instance != null) SettingsUI.Instance.Show(); });
+
         UiKit.MakeButton(root, "BtnQuit", "QUIT",
-            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -325f), new Vector2(560f, 96f),
+            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -410f), new Vector2(560f, 88f),
             UiKit.BtnDark, UiKit.BtnLightText, 42,
             () => Application.Quit());
 
@@ -96,6 +102,7 @@ public class MenuUI : MonoBehaviour
             "Grass slows you down to 45% speed\n" +
             "Checkpoints will NOT count if you cut across the grass\n" +
             "Your best lap is saved automatically\n" +
+            "SETTINGS: tune sound, buttons, paint and camera\n" +
             "Tap the pause button (top right) or press ESC / Back to pause";
 
         UiKit.MakeText(panel, "HowBody",

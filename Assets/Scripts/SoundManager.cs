@@ -31,6 +31,11 @@ public class SoundManager : MonoBehaviour
     CarController car;       // قراءة دورية للسرعة/الفرامل
     SurfaceChecker surface;  // حالة العشب
 
+    // (v0.8.0) مستويات الصوت من صفحة الإعدادات
+    float masterVol = 1f;
+    float engineVol = 1f;
+    float sfxVol = 1f;
+
     void Awake()
     {
         Instance = this;
@@ -59,6 +64,18 @@ public class SoundManager : MonoBehaviour
             car = carGO.GetComponent<CarController>();
             surface = carGO.GetComponent<SurfaceChecker>();
         }
+
+        // (v0.8.0) سحب مستويات الصوت المحفوظة (نموذج السحب = لا مشاكل ترتيب)
+        GameSettings.EnsureLoaded();
+        ApplyVolumes(GameSettings.MasterVolume, GameSettings.EngineVolume, GameSettings.SfxVolume);
+    }
+
+    /// <summary>(v0.8.0) تطبيق مستويات الصوت الثلاثة (0..1) من صفحة الإعدادات.</summary>
+    public void ApplyVolumes(float master, float engine, float sfx)
+    {
+        masterVol = Mathf.Clamp01(master);
+        engineVol = Mathf.Clamp01(engine);
+        sfxVol = Mathf.Clamp01(sfx);
     }
 
     AudioSource MakeSource(AudioClip clip, bool loop)
@@ -91,7 +108,7 @@ public class SoundManager : MonoBehaviour
         // ================= خمول: أثناء العد التنازلي =================
         if (mode == EngineMode.Idle)
         {
-            Fade(engineSrc, 0.13f);
+            Fade(engineSrc, 0.13f * masterVol * engineVol);
             engineSrc.pitch = Mathf.Lerp(engineSrc.pitch, 0.8f, 0.1f);
             Fade(skidSrc, 0f);
             Fade(grassSrc, 0f);
@@ -102,15 +119,15 @@ public class SoundManager : MonoBehaviour
         // طبق المحرك: 0.85x خمول متحرك ← 2.1x عند السرعة القصوى (يخفت قليلاً على العشب)
         float targetPitch = Mathf.Lerp(0.85f, 2.1f, speed01) * (grassNow ? 0.9f : 1f);
         engineSrc.pitch = Mathf.Lerp(engineSrc.pitch, targetPitch, 0.08f);
-        Fade(engineSrc, 0.14f + 0.13f * speed01);
+        Fade(engineSrc, (0.14f + 0.13f * speed01) * masterVol * engineVol);
 
         // صرير الفرامل: فقط أثناء فرملة فعلية بسرعة ملموسة (يهدأ مع تباطؤ السيارة)
         bool skidding = braking && speed01 > 0.22f;
         skidSrc.pitch = Mathf.Lerp(skidSrc.pitch, Mathf.Lerp(1.35f, 1.0f, speed01), 0.1f);
-        Fade(skidSrc, skidding ? 0.13f : 0f, 0.2f);
+        Fade(skidSrc, skidding ? 0.13f * masterVol * sfxVol : 0f, 0.2f);
 
         // حفيف العشب: عند الخروج عن الطريق بحركة
-        Fade(grassSrc, grassNow && speed01 > 0.03f ? 0.2f : 0f, 0.2f);
+        Fade(grassSrc, grassNow && speed01 > 0.03f ? 0.2f * masterVol * sfxVol : 0f, 0.2f);
     }
 
     /// <summary>تلاشٍ سلس نحو مستوى صوت هدف (يمنع القفزات المزعجة).</summary>
@@ -138,7 +155,7 @@ public class SoundManager : MonoBehaviour
         if (clip == null) return;
         AudioSource src = (sfxToggle++ & 1) == 0 ? sfxA : sfxB; // تناوب يسمح بالتداخل
         src.pitch = pitch;
-        src.volume = vol;
+        src.volume = vol * masterVol * sfxVol; // (v0.8.0) احترام مستويات الصوت
         src.clip = clip;
         src.Play();
     }

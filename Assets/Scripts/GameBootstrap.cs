@@ -59,16 +59,29 @@ public class GameBootstrap : MonoBehaviour
             car.transform.position = Vector3.zero;
         }
 
-        car.transform.localScale = new Vector3(1f, 2f, 1f);
+        // (v0.8.0) سيارة مرسومة إجرائياً من طبقتين:
+        // CarBody: هيكل أبيض يُلوّن بطلاء اللاعب من الإعدادات
+        // CarTrim: تفاصيل ثابتة (عجلات/قمرة/جناح/مصابيح) فوق الهيكل
+        // السبرايت 128×256 بـ PPU=128 = 1×2 وحدة عالمية — نفس أبعاد القديم تماماً
+        GameSettings.EnsureLoaded();
 
-        SpriteRenderer sr = car.AddComponent<SpriteRenderer>();
-        sr.sprite = MakeSolidSprite(64);
-        sr.color = new Color(0.85f, 0.2f, 0.2f, 1f); // أحمر
-        sr.sortingOrder = 10; // فوق بلاطات الحلبة
+        GameObject bodyGO = new GameObject("CarBody");
+        bodyGO.transform.SetParent(car.transform, false);
+        SpriteRenderer bodySR = bodyGO.AddComponent<SpriteRenderer>();
+        bodySR.sprite = CarSkin.Body();
+        bodySR.sortingOrder = 10;
+        bodySR.color = GameSettings.CurrentColor;
+
+        GameObject trimGO = new GameObject("CarTrim");
+        trimGO.transform.SetParent(car.transform, false);
+        SpriteRenderer trimSR = trimGO.AddComponent<SpriteRenderer>();
+        trimSR.sprite = CarSkin.Trim();
+        trimSR.sortingOrder = 11;
+        trimSR.color = Color.white;
 
         car.AddComponent<Rigidbody2D>(); // CarController يضبط خصائصه في Awake
         BoxCollider2D box = car.AddComponent<BoxCollider2D>();
-        box.size = new Vector2(1f, 1f); // يطابق حجم السبرايت (1x1 وحدة عالمية)
+        box.size = new Vector2(1f, 2f); // 1×2 وحدات عالمية (السبرايت أصلاً بهذا القياس الآن)
         car.AddComponent<CarController>();
         car.AddComponent<SurfaceChecker>(); // المرحلة 2: عقاب العشب
     }
@@ -95,9 +108,10 @@ public class GameBootstrap : MonoBehaviour
 
     void CreateMenus()
     {
-        new GameObject("MenuUI").AddComponent<MenuUI>();       // القائمة الرئيسية (ترتيب 40)
-        new GameObject("ResultsUI").AddComponent<ResultsUI>(); // شاشة النتائج (ترتيب 30)
-        new GameObject("PauseUI").AddComponent<PauseUI>();     // الإيقاف المؤقت (ترتيب 20)
+        new GameObject("SettingsUI").AddComponent<SettingsUI>(); // (v0.8.0) صفحة الإعدادات (ترتيب 50)
+        new GameObject("MenuUI").AddComponent<MenuUI>();         // القائمة الرئيسية (ترتيب 40)
+        new GameObject("ResultsUI").AddComponent<ResultsUI>();   // شاشة النتائج (ترتيب 30)
+        new GameObject("PauseUI").AddComponent<PauseUI>();       // الإيقاف المؤقت (ترتيب 20)
     }
 
     void CreateRaceFlow()

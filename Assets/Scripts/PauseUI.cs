@@ -39,12 +39,18 @@ public class PauseUI : MonoBehaviour
             () => { if (RaceFlow.Instance != null) RaceFlow.Instance.ResumeRace(); });
 
         UiKit.MakeButton(root, "BtnRestart", "RESTART RACE",
-            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -170f), new Vector2(520f, 96f),
+            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -160f), new Vector2(520f, 96f),
             UiKit.BtnDark, UiKit.BtnLightText, 42,
             () => { if (RaceFlow.Instance != null) RaceFlow.Instance.RestartRace(); });
 
+        // (v0.8.0) الإعدادات المتقدمة من داخل السباق (تُفتح فوق قائمة الوقفة)
+        UiKit.MakeButton(root, "BtnSettings", "SETTINGS",
+            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -285f), new Vector2(520f, 88f),
+            UiKit.BtnDark, UiKit.BtnLightText, 42,
+            () => { if (SettingsUI.Instance != null) SettingsUI.Instance.Show(); });
+
         UiKit.MakeButton(root, "BtnMenu", "MAIN MENU",
-            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -305f), new Vector2(520f, 96f),
+            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -400f), new Vector2(520f, 88f),
             UiKit.BtnDark, UiKit.BtnLightText, 42,
             () => { if (RaceFlow.Instance != null) RaceFlow.Instance.ToMenu(); });
     }

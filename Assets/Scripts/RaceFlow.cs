@@ -78,10 +78,13 @@ public class RaceFlow : MonoBehaviour
         }
 
         // ESC / زر الرجوع في أندرويد / P = إيقاف مؤقت واستئناف
-        if (State == RaceState.Racing &&
+        // (v0.8.0) تُتجاهل ما دامت صفحة الإعدادات مفتوحة (ESC يغلقها هي فقط)
+        bool settingsOpen = SettingsUI.Instance != null && SettingsUI.Instance.IsOpen;
+
+        if (State == RaceState.Racing && !settingsOpen &&
             (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.P)))
             PauseRace();
-        else if (State == RaceState.Paused &&
+        else if (State == RaceState.Paused && !settingsOpen &&
             (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.P)))
             ResumeRace();
     }
