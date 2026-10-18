@@ -81,10 +81,58 @@ public class CarController : MonoBehaviour
         BindHoldButton("BtnRight", down => holdingRight = down);
         BindHoldButton("BtnBrake", down => holdingBrake = down);
 
-        // تنسيق الأزرار ونصوصها وألوانها تلقائياً
-        ConfigureButton("BtnLeft",  "<",   SteerBaseColor, SteerPressedColor);
-        ConfigureButton("BtnRight", ">",   SteerBaseColor, SteerPressedColor);
+        // أزرار التوجيه (v0.6.6): أيقونتا سهم مرسومتان بالصور — مستقلتان عن الخطوط
+        // حتى لو فشل رندر النصوص على الجهاز تبقى أسهم التوجيه ظاهرة دائماً
+        ConfigureSteerIcon("BtnLeft",  pointRight: false);
+        ConfigureSteerIcon("BtnRight", pointRight: true);
+
+        // الفرامل: نص BRK (حروف لاتينية أساسية متوفرة في كل الخطوط)
         ConfigureButton("BtnBrake", "BRK", BrakeBaseColor, BrakePressedColor);
+    }
+
+    /// <summary>
+    /// (v0.6.6) أيقونة سهم مرسومة لأزرار التوجيه: تعطيل نص الزر ووضع Image بسبرايت
+    /// مثلث مولّد برمجياً — بديل مضمون الظهور عن نصوص "&lt;" و"&gt;" المعتمدة على الخط.
+    /// </summary>
+    void ConfigureSteerIcon(string buttonName, bool pointRight)
+    {
+        GameObject buttonGO = GameObject.Find(buttonName);
+        if (buttonGO == null) return;
+
+        Image image = buttonGO.GetComponent<Image>();
+        if (image != null)
+        {
+            image.color = SteerBaseColor;
+            driveButtons[buttonName] = image;
+            baseColors[buttonName] = SteerBaseColor;
+            pressedColors[buttonName] = SteerPressedColor;
+        }
+
+        // تعطيل نص الزر القديم (كان يعتمد على الخط)
+        Text oldText = buttonGO.GetComponentInChildren<Text>(true);
+        if (oldText != null) oldText.gameObject.SetActive(false);
+
+        // أيقونة السهم (صورة مركزية لا تعترض اللمس)
+        GameObject icon = new GameObject("ArrowIcon",
+            typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        icon.transform.SetParent(buttonGO.transform, false);
+
+        RectTransform irt = icon.GetComponent<RectTransform>();
+        irt.anchorMin = new Vector2(0.5f, 0.5f);
+        irt.anchorMax = new Vector2(0.5f, 0.5f);
+        irt.pivot = new Vector2(0.5f, 0.5f);
+        irt.anchoredPosition = Vector2.zero;
+
+        RectTransform brt = buttonGO.GetComponent<RectTransform>();
+        float side = 110f;
+        if (brt != null && brt.rect.width > 1f)
+            side = Mathf.Min(brt.rect.width, brt.rect.height) * 0.38f;
+        irt.sizeDelta = new Vector2(side, side);
+
+        Image img = icon.GetComponent<Image>();
+        img.sprite = UiKit.TriangleSprite(pointRight);
+        img.color = Color.white;
+        img.raycastTarget = false;
     }
 
     void Update()

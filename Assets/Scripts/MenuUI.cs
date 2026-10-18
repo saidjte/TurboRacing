@@ -90,13 +90,13 @@ public class MenuUI : MonoBehaviour
             56, TextAnchor.MiddleCenter, UiKit.Amber, FontStyle.Bold).text = "HOW TO PLAY";
 
         string body =
-            "The car accelerates on its own - hold < or > (bottom left) to steer\n" +
+            "The car accelerates on its own - hold the arrow buttons (bottom left) to steer\n" +
             "BRK (bottom right) brakes. Keep holding it to reverse out of tight spots\n" +
             "Finish 3 laps to complete the race\n" +
             "Grass slows you down to 45% speed\n" +
             "Checkpoints will NOT count if you cut across the grass\n" +
             "Your best lap is saved automatically\n" +
-            "Tap II (top right) or press ESC / Back to pause";
+            "Tap the pause button (top right) or press ESC / Back to pause";
 
         UiKit.MakeText(panel, "HowBody",
             new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -110f), new Vector2(1140f, 480f),

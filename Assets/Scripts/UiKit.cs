@@ -30,9 +30,26 @@ public static class UiKit
         {
             if (cachedUiFont == null)
             {
-                cachedUiFont = Resources.Load<Font>("Fonts/UiFont");
-                if (cachedUiFont == null)
-                    cachedUiFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                // v0.6.6: fallback chain with per-candidate health check
+                // 1) bundled real font, 2) Android OS fonts (Roboto), 3) builtin legacy
+                Font f = Resources.Load<Font>("Fonts/UiFont");
+                if (!IsHealthyFont(f))
+                {
+                    foreach (string name in OsFontCandidates)
+                    {
+                        Font os;
+                        try { os = Font.CreateDynamicFontFromOSFont(name, 48); }
+                        catch { os = null; }
+                        if (IsHealthyFont(os)) { f = os; break; }
+                    }
+                    if (!IsHealthyFont(f))
+                    {
+                        try { f = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf"); }
+                        catch { f = null; }
+                    }
+                }
+                cachedUiFont = f;
+                PrewarmFont(cachedUiFont);
             }
             return cachedUiFont;
         }
@@ -40,6 +57,118 @@ public static class UiKit
 
     /// <summary>توافق مع الاستدعاءات القديمة — يعيد UIFont.</summary>
     public static Font BuiltinFont => UIFont;
+
+    // مرشحو خطوط النظام (Roboto هو خط أندرويد المضمون على كل الأجهزة تقريباً)
+    static readonly string[] OsFontCandidates = { "Roboto", "Noto Sans", "Open Sans", "Helvetica", "Arial" };
+
+    /// <summary>فحص صحة الخط: ماديته موجودة ويستطيع رندر حرف فعلي — يحمي من خط محمّل بلا بيانات.</summary>
+    static bool IsHealthyFont(Font f)
+    {
+        if (f == null) return false;
+        try { return f.material != null && f.HasCharacter('A'); }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// تهيئة ذاكرة الحروف مسبقاً (كل ASCII) — يمنع أي فراغ في أول إطارات الرندر
+    /// ويجبر محرك الخطوط على بناء الأطلس فوراً عند الإقلاع.
+    /// </summary>
+    static void PrewarmFont(Font f)
+    {
+        if (f == null) return;
+        var sb = new System.Text.StringBuilder();
+        for (int i = 32; i <= 126; i++) sb.Append((char)i);
+        try { f.requestCharactersInTexture(sb.ToString(), 48, FontStyle.Bold); } catch { }
+        try { f.requestCharactersInTexture(sb.ToString(), 48, FontStyle.Normal); } catch { }
+    }
+
+    // سبرايتات الأسهم المرسومة (مستقلة عن الخطوط)
+    static Sprite cachedArrowLeft;
+    static Sprite cachedArrowRight;
+
+    /// <summary>سهم أبيض مرسوم بالكود (مثلث) — بديل مضمون عن نصوص أزرار التوجيه على كل الأجهزة (v0.6.6).</summary>
+    public static Sprite TriangleSprite(bool pointRight)
+    {
+        if (pointRight && cachedArrowRight != null) return cachedArrowRight;
+        if (!pointRight && cachedArrowLeft != null) return cachedArrowLeft;
+
+        const int N = 128;
+        Texture2D tex = new Texture2D(N, N, TextureFormat.RGBA32, false);
+        Color clear = new Color(0f, 0f, 0f, 0f);
+        Color[] pixels = new Color[N * N];
+        for (int i = 0; i < pixels.Length; i++) pixels[i] = clear;
+
+        // مثلث أفقي: القاعدة عند الوجه المقابل لاتجاه السهم
+        for (int x = 0; x < N; x++)
+        {
+            float t = pointRight ? 1f - x / (float)(N - 1) : x / (float)(N - 1);
+            int halfH = Mathf.RoundToInt(t * (N / 2 - 2));
+            for (int y = N / 2 - halfH; y <= N / 2 + halfH; y++)
+                pixels[y * N + x] = Color.white;
+        }
+
+        tex.SetPixels(pixels);
+        tex.Apply(false, false);
+        Sprite sp = Sprite.Create(tex, new Rect(0, 0, N, N), new Vector2(0.5f, 0.5f), N);
+        sp.name = pointRight ? "ArrowRight" : "ArrowLeft";
+
+        if (pointRight) cachedArrowRight = sp; else cachedArrowLeft = sp;
+        return sp;
+    }
+
+    /// <summary>شريط أبيض صلب (عنصر بناء الأيقونات — مستقل عن الخطوط).</summary>
+    static void MakeSolidBar(Transform parent, string name, Vector2 pos, Vector2 size)
+    {
+        GameObject go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        go.transform.SetParent(parent, false);
+
+        RectTransform rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = new Vector2(0.5f, 0.5f);
+        rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = pos;
+        rt.sizeDelta = size;
+
+        Image img = go.GetComponent<Image>();
+        img.color = Color.white;
+        img.raycastTarget = false;
+    }
+
+    /// <summary>
+    /// زر أيقونة إيقاف مؤقت حقيقي: شريطان أبيضان داخل مربع داكن (v0.6.6).
+    /// مرسوم بالصور بالكامل — مستقل عن أي خط، يظهر دائماً حتى لو فشل رندر كل النصوص.
+    /// </summary>
+    public static Button MakePauseButton(Transform parent, string name,
+        Vector2 anchor, Vector2 pivot, Vector2 pos, Vector2 size,
+        UnityEngine.Events.UnityAction onClick)
+    {
+        GameObject go = new GameObject(name,
+            typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+        go.transform.SetParent(parent, false);
+
+        RectTransform rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = anchor;
+        rt.anchorMax = anchor;
+        rt.pivot = pivot;
+        rt.anchoredPosition = pos;
+        rt.sizeDelta = size;
+
+        Image img = go.GetComponent<Image>();
+        img.color = new Color(0f, 0f, 0f, 0.50f);
+
+        Button btn = go.GetComponent<Button>();
+        btn.targetGraphic = img;
+        if (onClick != null) btn.onClick.AddListener(onClick);
+
+        float barW = size.x * 0.15f;
+        float barH = size.y * 0.44f;
+        float gap  = size.x * 0.11f;
+
+        MakeSolidBar(go.transform, "BarL", new Vector2(-gap / 2f - barW / 2f, 0f), new Vector2(barW, barH));
+        MakeSolidBar(go.transform, "BarR", new Vector2( gap / 2f + barW / 2f, 0f), new Vector2(barW, barH));
+
+        return btn;
+    }
 
     /// <summary>كانفاس Overlay بمقاس مرجعي 1920×1080 (مطابق لعرض الهواتف الأفقية).</summary>
     public static GameObject NewCanvas(string name, int sortingOrder)

@@ -55,12 +55,11 @@ public class RaceHUD : MonoBehaviour
             new Vector2(300f, 40f), 26, TextAnchor.LowerRight, new Color(1f, 1f, 1f, 0.55f))
             .text = "v" + GameVersion.Number;
 
-        // زر الإيقاف المؤقت (المرحلة 4) - أعلى يمين الشاشة
-        UiKit.MakeButton(canvasGO.transform, "BtnPause", "II",
+        // زر الإيقاف المؤقت (v0.6.6) - أيقونة حقيقية (شريطان أبيضان) مرسومة بالصور
+        // أعلى يمين الشاشة — مستقلة تماماً عن الخطوط فتظهر دائماً على كل الأجهزة
+        UiKit.MakePauseButton(canvasGO.transform, "BtnPause",
             new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-30f, -30f), new Vector2(100f, 100f),
-            new Color(0f, 0f, 0f, 0.45f), Color.white, 46,
-            () => { if (RaceFlow.Instance != null) RaceFlow.Instance.PauseRace(); },
-            FontStyle.Bold);
+            () => { if (RaceFlow.Instance != null) RaceFlow.Instance.PauseRace(); });
     }
 
     void Update()
