@@ -166,6 +166,7 @@ public class RaceFlow : MonoBehaviour
             carRb.position = pos;
             carRb.rotation = rot;
             carRb.linearVelocity = Vector2.zero;
+            carRb.angularVelocity = 0f; // (v0.6.8) لا دوران متبقٍ من السباق السابق
         }
 
         car.transform.position = pos;
