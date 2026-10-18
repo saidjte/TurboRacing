@@ -26,6 +26,13 @@ jobs:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          # توقيع release ثابت (v0.6.1): نفس المفتاح في كل بناء حتى تُثبَّت
+          # التحديثات فوق النسخة السابقة دون إزالتها (unity-builder يوقّع تلقائياً
+          # عندما توجد هذه المتغيرات، والملف مُرمَّز base64)
+          ANDROID_KEYSTORE_FILE: ${{ secrets.ANDROID_KEYSTORE_FILE }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS_NAME: ${{ secrets.ANDROID_KEY_ALIAS_NAME }}
+          ANDROID_KEY_ALIAS_PASSWORD: ${{ secrets.ANDROID_KEY_ALIAS_PASSWORD }}
         with:
           targetPlatform: Android
           unityVersion: 6000.0.84f1

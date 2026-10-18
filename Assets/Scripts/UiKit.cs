@@ -17,7 +17,29 @@ public static class UiKit
     public static readonly Color BtnLightText = Color.white;
     public static readonly Color BtnAmberText = new Color(0.12f, 0.08f, 0.02f);
 
-    public static Font BuiltinFont => Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+    static Font cachedUiFont;
+
+    /// <summary>
+    /// خط الواجهة (v0.6.1): خط حقيقي مضمّن في الحزمة (Assets/Resources/Fonts/UiFont.ttf)
+    /// بدل الخط المدمج LegacyRuntime الذي قد لا يُصيَّر نصوصه على بعض أجهزة أندرويد
+    /// (صورة الأزرار تظهر والنص مخفي). مع احتياطي تلقائي للخط المدمج إن فشل التحميل.
+    /// </summary>
+    public static Font UIFont
+    {
+        get
+        {
+            if (cachedUiFont == null)
+            {
+                cachedUiFont = Resources.Load<Font>("Fonts/UiFont");
+                if (cachedUiFont == null)
+                    cachedUiFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            }
+            return cachedUiFont;
+        }
+    }
+
+    /// <summary>توافق مع الاستدعاءات القديمة — يعيد UIFont.</summary>
+    public static Font BuiltinFont => UIFont;
 
     /// <summary>كانفاس Overlay بمقاس مرجعي 1920×1080 (مطابق لعرض الهواتف الأفقية).</summary>
     public static GameObject NewCanvas(string name, int sortingOrder)

@@ -181,7 +181,7 @@ public class GameBootstrap : MonoBehaviour
         trt.offsetMax = Vector2.zero;
 
         Text text = textGO.GetComponent<Text>();
-        text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        text.font = UiKit.UIFont; // خط حقيقي مضمّن (v0.6.1) يُصيَّر بشكل مضمون على الأجهزة
         text.fontSize = 72;
         text.alignment = TextAnchor.MiddleCenter;
         text.color = Color.white;
