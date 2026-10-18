@@ -26,6 +26,7 @@ public class GameBootstrap : MonoBehaviour
         CreateCanvasAndButtons();
         CreateHUD();            // المرحلة 3: عداد اللفات والمؤقت
         CreateMenus();          // المرحلة 4: القائمة الرئيسية + النتائج + الإيقاف المؤقت
+        CreateCinematicOverlay(); // (v0.9.0) فينييت سينمائي تحت كل الواجهات
         CreateEventSystem();
         SetupCamera();
         CreateRaceFlow();       // المرحلة 4: آلة حالات السباق (أخيراً حتى يجد كل شيء)
@@ -79,6 +80,16 @@ public class GameBootstrap : MonoBehaviour
         trimSR.sortingOrder = 11;
         trimSR.color = Color.white;
 
+        // (v0.9.0) ظل أرضي تحت السيارة: أقوى إشارة عمق في المنظور العلوي/المطاردة
+        GameObject shadowGO = new GameObject("CarShadow");
+        shadowGO.transform.SetParent(car.transform, false);
+        SpriteRenderer shadowSR = shadowGO.AddComponent<SpriteRenderer>();
+        shadowSR.sprite = CarSkin.Shadow();
+        shadowSR.sortingOrder = 9; // فوق آثار الإطارات وتحت الهيكل
+        shadowSR.color = new Color(0f, 0f, 0f, 0.85f);
+        shadowGO.transform.localPosition = new Vector3(0.12f, -0.16f, 0f);
+        shadowGO.transform.localScale = new Vector3(1.12f, 1.07f, 1f);
+
         car.AddComponent<Rigidbody2D>(); // CarController يضبط خصائصه في Awake
         BoxCollider2D box = car.AddComponent<BoxCollider2D>();
         box.size = new Vector2(1f, 2f); // 1×2 وحدات عالمية (السبرايت أصلاً بهذا القياس الآن)
@@ -118,6 +129,63 @@ public class GameBootstrap : MonoBehaviour
     {
         // يُنشأ أخيراً: Start الخاص به يعمل بعد جاهزية كل المكونات ويفتح القائمة
         new GameObject("RaceFlow").AddComponent<RaceFlow>();
+    }
+
+    // ================= فينييت سينمائي (v0.9.0) =================
+
+    /// <summary>
+    /// طبقة تعتيم رقيقة على أطراف الشاشة (ترتيب -10: فوق العالم وتحت كل الواجهات)
+    /// تمنح إحساس عدسة/عمق وتبرز مركز اللعب — raycast معطّل فلا تعيق اللمس.
+    /// </summary>
+    void CreateCinematicOverlay()
+    {
+        GameObject c = UiKit.NewCanvas("CinematicOverlay", -10);
+
+        GameObject img = new GameObject("Vignette",
+            typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        img.transform.SetParent(c.transform, false);
+
+        RectTransform rt = img.GetComponent<RectTransform>();
+        rt.anchorMin = Vector2.zero;
+        rt.anchorMax = Vector2.one;
+        rt.offsetMin = Vector2.zero;
+        rt.offsetMax = Vector2.zero;
+
+        Image im = img.GetComponent<Image>();
+        im.sprite = VignetteSprite();
+        im.raycastTarget = false;
+        im.color = Color.white;
+    }
+
+    /// <summary>تدرج شعاعي: شفاف بالمركز، تعتيم يتصاعد نحو الزوايا.</summary>
+    Sprite VignetteSprite()
+    {
+        const int S = 512;
+        Texture2D tex = new Texture2D(S, S, TextureFormat.RGBA32, false);
+        tex.filterMode = FilterMode.Bilinear;
+
+        Color[] px = new Color[S * S];
+        float c = S * 0.5f;
+        float maxD = Mathf.Sqrt(2f) * c;
+
+        for (int y = 0; y < S; y++)
+        {
+            for (int x = 0; x < S; x++)
+            {
+                float d = Mathf.Sqrt((x + 0.5f - c) * (x + 0.5f - c) +
+                                     (y + 0.5f - c) * (y + 0.5f - c)) / maxD;
+                // 0 حتى 55% من نصف القطر ثم تتدرج إلى 0.34 عند الزوايا
+                float a = Mathf.SmoothStep(0.55f, 1f, d) * 0.34f;
+                px[y * S + x] = new Color(0f, 0f, 0.02f, a);
+            }
+        }
+
+        tex.SetPixels(px);
+        tex.Apply(false, false);
+
+        Sprite sp = Sprite.Create(tex, new Rect(0, 0, S, S), new Vector2(0.5f, 0.5f), 100f);
+        sp.name = "VignetteSprite";
+        return sp;
     }
 
     // ================= الكاميرا =================
