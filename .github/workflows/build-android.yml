@@ -47,6 +47,8 @@ jobs:
           unityVersion: 6000.0.84f1
           buildMethod: BuildCommand.PerformBuild
           buildName: TurboRacing
+          # Assets imported from the private repo make the tree dirty on purpose
+          allowDirtyBuild: true
 
       # Stable release signing (v0.6.2): explicit zipalign + apksigner with the
       # same keystore on every build so updates install over previous versions
