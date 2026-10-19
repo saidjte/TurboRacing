@@ -4,49 +4,23 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 /// <summary>
-/// TurboRacing - v1.0.0 (لعبة ثلاثية الأبعاد حقيقية)
-/// نفس نموذج القيادة المعتمد (v0.6.8) منقول إلى فيزياء Rigidbody ثلاثية الأبعاد:
-/// - تسارع تلقائي دائم + فرامل تتحول لرجوع بطيء + توجيه بسرعة زاوية صريحة
-/// - القيد FreezePositionY + FreezeRotationX/Z = السيارة تنزلق على مستوى أفقي
-///   ثابت تماماً كالنسخة ثنائية الأبعاد، لكن داخل عالم مجسّم كامل
-/// - سيطرة كاملة على الدوران: rb.angularVelocity يُضبط كل خطوة فيزيائية
-///   (تصادمات الجدران لا تستطيع تدوير السيارة من تلقاء نفسها — نفس جذر إصلاح v0.6.8)
-/// - مادة هيكل بلا احتكاك: انزلاق ناعم على الجدران
-/// - إشارة التوجيه في 3D: دوران يمين (+1) = دوران موجب حول Y (تأكيد هندسي في التعليقات)
-/// - حركة بصرية: عجلات تدور وتتوجه + ميلان هيكل في المنعطفات + انحناء عند الفرملة
-/// - تتبع معرفات الأصابع لكل زر (v0.6.8) كما هو دون تغيير
+/// TurboRacing - v1.1.0 (محرك PROMETEO: Car Controller)
+/// واجهة قيادة (facade) تُبقي واجهتنا العامة المعتمدة كما هي، وداخلها الفيزياء الحقيقية
+/// من PrometeoCarController (WheelColliders + تعليق + نقل ثقل + انزلاق):
+/// - تسارع تلقائي دائم: GoForward() كل خطوة (نفس أسلوب اللعب المعتمد منذ v0.1.0)
+/// - زر الفرامل: فرملة فعلية أثناء الحركة ثم رجوع بطيء عند التوقف تقريباً (أسلوب الموبايل)
+/// - التوجيه: TurnLeft/TurnRight/ResetSteeringAngle من Prometeo مباشرة
+/// - وضع externalControl في نسخة Prometeo (تعديل مصرّح به ملاحظة المؤلف) يعطّل مدخلات
+///   الكيبورد المدمجة ويُبقي حساب السرعة/الانزلاق وتحريك عجلات النموذج
+/// - إصلاح انقلاب ذاتي: لو انقلبت السيارة (فيزياء حقيقية) تعود واقفة بعد لحظة
+/// - عقاب العشب عبر SetSpeedLimit (حد السرعة) + SetGripOverride (تماسك WheelColliders)
+/// - لون السيارة: اختيار أقرب دهان من دهانات ARCADE الخمسة (نسيج حقيقي كامل)
+/// - أزرار اللمس + تتبع الأصابع (v0.6.8) كما هي حرفياً
 /// </summary>
 [RequireComponent(typeof(Rigidbody))]
 public class CarController : MonoBehaviour
 {
-    [Header("السرعة (متر/ثانية)")]
-    [Tooltip("السرعة القصوى")]
-    public float maxSpeed = 14f;
-
-    [Tooltip("التسارع التلقائي (م/ث لكل ثانية)")]
-    public float acceleration = 10f;
-
-    [Tooltip("تباطؤ الفرامل (م/ث لكل ثانية)")]
-    public float brakeDeceleration = 22f;
-
-    [Tooltip("أقصى سرعة رجوع للخلف عند الاستمرار بالضغط على الفرامل")]
-    public float maxReverseSpeed = 4f;
-
-    [Header("التوجيه")]
-    [Tooltip("أقصى سرعة دوران (درجة/ثانية)")]
-    public float maxTurnSpeed = 220f;
-
-    [Tooltip("السرعة التي تصل عندها قوة التوجيه إلى قصاها")]
-    public float fullTurnAtSpeed = 5f;
-
-    [Tooltip("نسبة التوجيه عند السرعة القصوى (0.75 = توجيه أهدأ 25% في المستقيمات)")]
-    [Range(0.5f, 1f)]
-    public float highSpeedTurnFactor = 0.75f;
-
-    [Tooltip("تماسك الإطارات الجانبي (0 = انزلاق كامل، 10 = تماسك قوي)")]
-    public float lateralGrip = 6f;
-
-    // --- حالة الإدخال اللمسي ---
+    // --- إدخال اللاعب ---
     private bool holdingLeft;
     private bool holdingRight;
     private bool holdingBrake;
@@ -67,29 +41,30 @@ public class CarController : MonoBehaviour
     private readonly Dictionary<string, Color> pressedColors = new Dictionary<string, Color>();
 
     private Rigidbody rb;
-    private float currentMaxSpeed;
+    private PrometeoCarController pcc;
+    private readonly WheelCollider[] wheels = new WheelCollider[4]; // FL FR RL RR
 
-    // --- الضبط القابل للتخصيص (v0.8.0) ---
-    private float baseGrip = 6f;
+    // --- الضبط ---
+    private float maxSpeedKmh;       // الحد الأقصى من الضبطة (كم/س)
+    private float baseSidewaysStiffness = 1f;
     private float gripOverride = 1f;
+
+    // --- النموذج البصري ---
+    private Transform modelRoot;
     private MeshRenderer paintRenderer;
-    private SurfaceChecker surface;
+    private readonly Transform[] wheelMeshes = new Transform[4];
+    private bool usingArcadeAsset;
 
-    // --- الحركة البصرية المجسّمة (v1.0.0) ---
-    private Transform[] wheelPivots = new Transform[4];
-    private Transform bodyPivot;
-    private float wheelSpin;
-    private float steerVisual;
-    private float rollCur, pitchCur;
+    // --- إصلاح الانقلاب ---
+    private float flipTimer;
 
-    // خصائص للقراءة من سكربتات أخرى
-    public float SpeedKmh => rb != null ? rb.linearVelocity.magnitude * 3.6f : 0f;
-    public bool IsBraking => holdingBrake;
+    // خصائص للقراءة من سكربتات أخرى (الواجهة المعتمدة كما هي)
+    public float SpeedKmh => pcc != null ? Mathf.Abs(pcc.carSpeed)
+                                         : (rb != null ? rb.linearVelocity.magnitude * 3.6f : 0f);
+    public bool IsBraking => holdingBrake && ForwardSpeed() > 0.5f;
 
     /// <summary>السرعة الحالية نسبةً إلى الحد الأقصى (0..1) — للصوت والآثار.</summary>
-    public float Speed01 => rb != null
-        ? Mathf.Clamp01(rb.linearVelocity.magnitude / Mathf.Max(1f, currentMaxSpeed))
-        : 0f;
+    public float Speed01 => maxSpeedKmh > 1f ? Mathf.Clamp01(SpeedKmh / maxSpeedKmh) : 0f;
 
     /// <summary>مُصدِّر مادة الطلاء (يستخدمه SurfaceChecker للتلطيخ على العشب).</summary>
     public MeshRenderer PaintRenderer => paintRenderer;
@@ -98,35 +73,16 @@ public class CarController : MonoBehaviour
     {
         rb = GetComponent<Rigidbody>();
 
-        // ضبط ذاتي للفيزياء المجسّمة: حركة مستوية ثابتة (لا طيران ولا انقلاب)
-        rb.useGravity = false;
+        // فيزياء سيارة حقيقية: جاذبية + دوران حر + قيم Prometeo المرجعية
+        rb.mass = 950f;
         rb.linearDamping = 0f;
         rb.angularDamping = 0.05f;
         rb.interpolation = RigidbodyInterpolation.Interpolate;
         rb.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
-        rb.constraints = RigidbodyConstraints.FreezePositionY |
-                         RigidbodyConstraints.FreezeRotationX |
-                         RigidbodyConstraints.FreezeRotationZ;
+        rb.useGravity = true;
+        rb.constraints = RigidbodyConstraints.None;
 
-        // مادة هيكل بلا احتكاك + ارتداد خفيف (كما في v0.6.8)
-        Collider bodyCol = GetComponent<Collider>();
-        if (bodyCol != null && bodyCol.sharedMaterial == null)
-        {
-            PhysicsMaterial shell = new PhysicsMaterial("CarShell");
-            shell.staticFriction = 0f;
-            shell.dynamicFriction = 0f;
-            shell.bounciness = 0.15f;
-            shell.frictionCombine = PhysicsMaterialCombine.Minimum;
-            bodyCol.sharedMaterial = shell;
-        }
-
-        currentMaxSpeed = maxSpeed;
-
-        // بناء النموذج المجسّم (هيكل/تفاصيل/عجلات)
-        CarModel3D.Handles h = CarModel3D.Build(transform);
-        bodyPivot = h.BodyPivot;
-        paintRenderer = h.Paint;
-        wheelPivots = h.Wheels;
+        BuildCar();
     }
 
     void Start()
@@ -147,6 +103,277 @@ public class CarController : MonoBehaviour
         DriveButtonsLayout.Apply(this);
     }
 
+    // ================= بناء السيارة (نموذج ARCADE + فيزياء Prometeo) =================
+
+    void BuildCar()
+    {
+        usingArcadeAsset = TryBuildArcadeModel(out modelRoot);
+        if (!usingArcadeAsset)
+        {
+            // الاحتياطي: السيارة الإجرائية (CarModel3D) — نفس جودة اللعب بلا الأصل الخارجي
+            CarModel3D.Handles h = CarModel3D.Build(transform);
+            paintRenderer = h.Paint;
+            modelRoot = h.BodyPivot != null ? h.BodyPivot.root.gameObject.transform : transform;
+            if (h.Wheels != null)
+            {
+                for (int i = 0; i < 4 && i < h.Wheels.Length; i++)
+                    wheelMeshes[i] = h.Wheels[i]; // محاور العجلات الإجرائية = مواضع العجلات
+            }
+        }
+
+        FindWheelMeshes(usingArcadeAsset);
+
+        // مصادم الهيكل (ارتجالات الجدران + أحداث التصادم) — من حدود النموذج الفعلية
+        Vector3 min, max;
+        ComputeModelBounds(out min, out max);
+        BoxCollider body = gameObject.GetComponent<BoxCollider>();
+        if (body == null) body = gameObject.AddComponent<BoxCollider>();
+        body.center = new Vector3(0f, (min.y + max.y) * 0.5f + 0.05f, (min.z + max.z) * 0.5f);
+        body.size = new Vector3(max.x - min.x + 0.05f, Mathf.Max(0.6f, max.y - min.y), max.z - min.z);
+
+        PhysicsMaterial shell = new PhysicsMaterial("CarShell");
+        shell.staticFriction = 0.05f;
+        shell.dynamicFriction = 0.05f;
+        shell.bounciness = 0.15f;
+        shell.frictionCombine = PhysicsMaterialCombine.Minimum;
+        body.sharedMaterial = shell;
+
+        // مصادمات العجلات الأربعة عند مواضع عقد العجلات الفعلية
+        BuildWheelColliders();
+
+        // متحكم Prometeo: وضع التحكم الخارجي (ندرس المدخلات ونمرر الأوامر)
+        pcc = gameObject.AddComponent<PrometeoCarController>();
+        pcc.externalControl = true;
+        pcc.useTouchControls = false;
+        pcc.useUI = false;
+        pcc.useSounds = false; // نظام الصوت المعتمد (SoundManager) يبقى مصدر الصوت
+        pcc.useEffects = true;
+
+        pcc.frontLeftMesh  = wheelMeshes[0] != null ? wheelMeshes[0].gameObject : null;
+        pcc.frontRightMesh = wheelMeshes[1] != null ? wheelMeshes[1].gameObject : null;
+        pcc.rearLeftMesh   = wheelMeshes[2] != null ? wheelMeshes[2].gameObject : null;
+        pcc.rearRightMesh  = wheelMeshes[3] != null ? wheelMeshes[3].gameObject : null;
+        pcc.frontLeftCollider  = wheels[0];
+        pcc.frontRightCollider = wheels[1];
+        pcc.rearLeftCollider   = wheels[2];
+        pcc.rearRightCollider  = wheels[3];
+        pcc.bodyMassCenter = new Vector3(0f, 0.15f, 0f);
+
+        AttachDriftEffects();
+    }
+
+    /// <summary>تحميل نموذج ARCADE من الموارد (الأصول الخاصة) وتركيبه تحت الجذر.</summary>
+    bool TryBuildArcadeModel(out Transform root)
+    {
+        root = null;
+        GameObject prefab = Resources.Load<GameObject>("GameAssets/ArcadeCar/ARCADE - FREE Racing Car");
+        if (prefab == null)
+        {
+            Debug.Log("[CarController] نموذج ARCADE غير موجود في الموارد — استخدام السيارة الإجرائية.");
+            return false;
+        }
+
+        GameObject go = Instantiate(prefab, transform);
+        go.name = "ArcadeCarModel";
+        go.transform.localPosition = Vector3.zero;
+        go.transform.localRotation = Quaternion.identity;
+        go.transform.localScale = Vector3.one;
+
+        // إسناد الخامات قسراً (لا نعتمد materialSearch): الطلاء في الخانة 0
+        // والإضاءة (مصابيح) في الخانة الثانية لمشيد Body — حسب بريفاب الناشر
+        ApplyArcadeMaterials(go.transform, 3); // النسخة الحمراء أساساً حتى يختار اللاعب لونه
+
+        root = go.transform;
+        return true;
+    }
+
+    /// <summary>ربط خامات الطلاء والإضاءة على كل رندررات النموذج (منهج البريفاب الأصلي).</summary>
+    void ApplyArcadeMaterials(Transform model, int variant)
+    {
+        if (model == null) return;
+
+        Material paint = Resources.Load<Material>(
+            $"GameAssets/ArcadeCar/Materials/Color Variations/AFRC_Mat_Col{Mathf.Clamp(variant, 1, 5)}");
+        Material emission = Resources.Load<Material>("GameAssets/ArcadeCar/Materials/AFRC_Emission");
+        if (paint == null) return;
+
+        Transform bodyT = FindDeep(model, "Body");
+
+        foreach (Renderer r in model.GetComponentsInChildren<Renderer>())
+        {
+            Material[] mats = r.sharedMaterials;
+            for (int s = 0; s < mats.Length; s++)
+            {
+                if (s == 0) mats[s] = paint;
+                else if (emission != null) mats[s] = emission;
+            }
+            r.sharedMaterials = mats;
+            if (bodyT != null && r.transform == bodyT && mats.Length > 1)
+                paintRenderer = r; // مشيد الهيكل = مصدر طلاء للتلطيخ والإضاءة
+        }
+    }
+
+    void FindWheelMeshes(bool arcade)
+    {
+        if (arcade)
+        {
+            wheelMeshes[0] = FindDeep(transform, "FrontLeftWheel");
+            wheelMeshes[1] = FindDeep(transform, "FrontRightWheel");
+            wheelMeshes[2] = FindDeep(transform, "RearLeftWheel");
+            wheelMeshes[3] = FindDeep(transform, "RearRightWheel");
+
+            if (paintRenderer == null)
+            {
+                Transform bodyT = FindDeep(transform, "Body");
+                if (bodyT != null) paintRenderer = bodyT.GetComponent<MeshRenderer>();
+            }
+        }
+
+        for (int i = 0; i < 4; i++)
+        {
+            if (wheelMeshes[i] == null)
+                Debug.LogWarning($"[CarController] wheel node #{i} missing - using estimated position.");
+        }
+
+        // مواضع تقديرية متماثلة عند غياب عقد العجلات (سيارة إجرائية بلا عقد مسماة)
+        fallbackPositions = new Vector3[]
+        {
+            new Vector3(-0.62f, 0.30f,  0.95f),
+            new Vector3( 0.62f, 0.30f,  0.95f),
+            new Vector3(-0.62f, 0.30f, -0.95f),
+            new Vector3( 0.62f, 0.30f, -0.95f),
+        };
+    }
+
+    private Vector3[] fallbackPositions;
+
+    static Transform FindDeep(Transform parent, string name)
+    {
+        if (parent.name == name) return parent;
+        for (int i = 0; i < parent.childCount; i++)
+        {
+            Transform r = FindDeep(parent.GetChild(i), name);
+            if (r != null) return r;
+        }
+        return null;
+    }
+
+    void ComputeModelBounds(out Vector3 min, out Vector3 max)
+    {
+        min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+        max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+        bool any = false;
+        foreach (Renderer r in GetComponentsInChildren<Renderer>())
+        {
+            Bounds b = r.bounds;
+            Vector3 lo = transform.InverseTransformPoint(b.min);
+            Vector3 hi = transform.InverseTransformPoint(b.max);
+            min = Vector3.Min(min, lo); max = Vector3.Max(max, hi);
+            any = true;
+        }
+        if (!any) { min = new Vector3(-0.6f, 0f, -1.3f); max = new Vector3(0.6f, 1f, 1.3f); }
+        min.y = Mathf.Max(0.08f, min.y); // المصادم يبدأ فوق سطح العجلات
+    }
+
+    void BuildWheelColliders()
+    {
+        Transform colRoot = new GameObject("WheelColliders").transform;
+        colRoot.SetParent(transform, false);
+
+        Vector3[] pos = new Vector3[4];
+        for (int i = 0; i < 4; i++)
+        {
+            pos[i] = wheelMeshes[i] != null
+                ? transform.InverseTransformPoint(wheelMeshes[i].position)
+                : fallbackPositions[i];
+        }
+
+        float radius = EstimateWheelRadius();
+
+        string[] names = { "WheelCol_FL", "WheelCol_FR", "WheelCol_RL", "WheelCol_RR" };
+        for (int i = 0; i < 4; i++)
+        {
+            GameObject wg = new GameObject(names[i]);
+            wg.transform.SetParent(colRoot, false);
+            wg.transform.localPosition = pos[i];
+
+            WheelCollider wc = wg.AddComponent<WheelCollider>();
+            wc.radius = radius;
+
+            // قيم التعليق المرجعية من بريفاب Prometeo (950 كغم)
+            JointSpring spring = wc.suspensionSpring;
+            spring.spring = 35000f;
+            spring.damper = 4500f;
+            spring.targetPosition = 0.5f;
+            wc.suspensionSpring = spring;
+            wc.suspensionDistance = 0.3f;
+            wc.forceAppPointDistance = 0.02f;
+
+            wc.mass = 20f;
+            wc.wheelDampingRate = 0.25f;
+            wc.forwardFriction = MakeFriction(0.38f, 1f, 0.92f, 1f, 1f);
+            wc.sidewaysFriction = MakeFriction(0.30f, 1f, 0.86f, 1f, 1f);
+
+            wheels[i] = wc;
+        }
+
+        baseSidewaysStiffness = 1f;
+    }
+
+
+    float EstimateWheelRadius()
+    {
+        foreach (Transform wm in wheelMeshes)
+        {
+            if (wm == null) continue;
+            Renderer r = wm.GetComponentInChildren<Renderer>();
+            if (r == null) continue;
+            Bounds b = r.bounds;
+            // محور العجلة أفقي جانبي (X): الامتداد الرأسي/الطولي = القطر
+            return Mathf.Max(0.18f, (b.extents.y + b.extents.z) * 0.5f);
+        }
+        return 0.34f; // مرجع Prometeo
+    }
+
+    static WheelFrictionCurve MakeFriction(float exSlip, float exVal, float asySlip, float asyVal, float stiff)
+    {
+        WheelFrictionCurve f = new WheelFrictionCurve();
+        f.extremumSlip = exSlip; f.extremumValue = exVal;
+        f.asymptoteSlip = asySlip; f.asymptoteValue = asyVal;
+        f.stiffness = stiff;
+        return f;
+    }
+
+    /// <summary>دخان الانزلاق + آثار الإطارات من حزمة Prometeo عند العجلتين الخلفيتين.</summary>
+    void AttachDriftEffects()
+    {
+        if (wheels[2] == null || wheels[3] == null) return;
+
+        GameObject smoke = Resources.Load<GameObject>("GameAssets/Prometeo/Effects/TireSmoke_PS");
+        GameObject skid  = Resources.Load<GameObject>("GameAssets/Prometeo/Effects/TireSkid");
+
+        for (int i = 2; i < 4; i++)
+        {
+            Vector3 at = wheels[i].transform.localPosition;
+            if (smoke != null)
+            {
+                GameObject s = Instantiate(smoke, transform);
+                s.transform.localPosition = new Vector3(at.x, 0.15f, at.z);
+                if (i == 2) pcc.RLWParticleSystem = s.GetComponent<ParticleSystem>();
+                else        pcc.RRWParticleSystem = s.GetComponent<ParticleSystem>();
+            }
+            if (skid != null)
+            {
+                GameObject t = Instantiate(skid, transform);
+                t.transform.localPosition = new Vector3(at.x, 0.06f, at.z);
+                if (i == 2) pcc.RLWTireSkid = t.GetComponent<TrailRenderer>();
+                else        pcc.RRWTireSkid = t.GetComponent<TrailRenderer>();
+            }
+        }
+    }
+
+    // ================= حلقة القيادة (توزيع الأوامر على Prometeo) =================
+
     void Update()
     {
         // احتياطي للتجربة داخل المحرر فقط
@@ -165,28 +392,87 @@ public class CarController : MonoBehaviour
 
     void FixedUpdate()
     {
-        float steerInput = (holdingRight ? 1f : 0f) - (holdingLeft ? 1f : 0f);
+        if (pcc == null) return;
 
-        ApplySteering(steerInput);
-        ApplyThrottleAndBrake();
-        ApplyLateralGripAndSpeedClamp();
-        UpdateVisuals(steerInput);
+        bool frozen = (rb.constraints & RigidbodyConstraints.FreezePosition) != 0;
 
-        // آثار الإطارات: انعطاف حاد بسرعة أو فرملة قوية بسرعة
-        if (SkidMarks.Instance != null)
+        if (frozen)
         {
-            Vector3 vel = rb.linearVelocity; vel.y = 0f;
-            float forwardSpeedNow = Vector3.Dot(vel, transform.forward);
-            bool hardSteer = Mathf.Abs(steerInput) > 0.5f && forwardSpeedNow > 7f;
-            bool hardBrake = holdingBrake && forwardSpeedNow > 5f;
-            if (hardSteer || hardBrake)
-                SkidMarks.Instance.Drop(rb.position - transform.forward * 0.95f, transform.eulerAngles.y);
+            // أثناء العد التنازلي/القائمة: لا عزم (الـ Rigidbody مجمّد أصلاً)
+            pcc.ThrottleOff();
+            return;
+        }
+
+        // --- التوجيه ---
+        if (holdingLeft && !holdingRight) pcc.TurnLeft();
+        else if (holdingRight && !holdingLeft) pcc.TurnRight();
+        else pcc.ResetSteeringAngle();
+
+        // --- التسارع التلقائي / الفرامل-الرجوع (الأسلوب المعتمد) ---
+        float fwd = ForwardSpeed();
+        if (holdingBrake)
+        {
+            if (fwd > 1.2f)
+            {
+                pcc.ThrottleOff();
+                pcc.Brakes();
+            }
+            else
+            {
+                pcc.GoReverse();
+            }
+        }
+        else
+        {
+            pcc.GoForward(); // تسارع تلقائي دائم
+        }
+
+        UpdateDriftEffects();
+        CheckFlipRecovery();
+    }
+
+    float ForwardSpeed()
+    {
+        Vector3 vel = rb.linearVelocity; vel.y = 0f;
+        return Vector3.Dot(vel, transform.forward);
+    }
+
+    // ================= المؤثرات (مزامنة نبضات Prometeo) =================
+
+    void UpdateDriftEffects()
+    {
+        // pcc.isDrifting يُحسب داخل GoForward/GoReverse عبر localVelocityX
+        // (يعمل لأن externalControl يُبقي حساب بيانات السيارة شغالاً في Update)
+        pcc.DriftCarPS();
+    }
+
+    // ================= إصلاح الانقلاب الذاتي =================
+
+    void CheckFlipRecovery()
+    {
+        Vector3 up = transform.up;
+        if (up.y < 0.35f)
+        {
+            flipTimer += Time.fixedDeltaTime;
+            if (flipTimer > 1.5f)
+            {
+                float yaw = transform.eulerAngles.y;
+                Vector3 p = transform.position;
+                p.y = 1.2f;
+                rb.position = p;
+                rb.rotation = Quaternion.Euler(0f, yaw, 0f);
+                rb.linearVelocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+                flipTimer = 0f;
+            }
+        }
+        else
+        {
+            flipTimer = 0f;
         }
     }
 
-    /// <summary>
-    /// مؤثر التصادم: صوت ارتطام متدرّج القوة + اهتزاز كاميرا (كما في v0.7.0).
-    /// </summary>
+    /// <summary>مؤثر التصادم: صوت ارتطام متدرّج القوة + اهتزاز كاميرا (كما في v0.7.0).</summary>
     void OnCollisionEnter(Collision collision)
     {
         float impact = collision.relativeVelocity.magnitude;
@@ -201,122 +487,7 @@ public class CarController : MonoBehaviour
             CameraFollow.Instance.Shake(Mathf.Lerp(0.08f, 0.3f, impact01));
     }
 
-    // ================= الفيزياء =================
-
-    /// <summary>
-    /// إشارة الدوران في الفضاء المجسّم (تأكيد هندسي):
-    /// forward(yaw) = (sinθ, 0, cosθ) — زيادة θ (+Y) تقود من +Z نحو +X
-    /// أي من الشمال نحو الشرق = دوران يمين (مع عقارب الساعة من الأعلى).
-    /// إذن steerInput = +1 (يمين) ⟹ سرعة زاوية +Y. (في 2D كانت السالبة لعكس
-    /// اتجاه عقارب السكان هناك — نفس الإحساس بالضبط بعد التحويل).
-    /// </summary>
-    void ApplySteering(float steerInput)
-    {
-        Vector3 vel = rb.linearVelocity; vel.y = 0f;
-        float forwardSpeed = Vector3.Dot(vel, transform.forward);
-
-        // قوة التوجيه تتناسب مع السرعة (لا دوران في الثبات)
-        float speedFactor = Mathf.Clamp01(Mathf.Abs(forwardSpeed) / fullTurnAtSpeed);
-
-        // عند الرجوع للخلف ينعكس اتجاه الدوران مثل سيارة حقيقية
-        float reverse = forwardSpeed < -0.1f ? -1f : 1f;
-
-        // تخفيف طفيف للتوجيه قرب السرعة القصوى
-        float speed01 = Mathf.Clamp01(Mathf.Abs(forwardSpeed) / Mathf.Max(1f, currentMaxSpeed));
-        float turnScale = Mathf.Lerp(1f, highSpeedTurnFactor, speed01);
-
-        // الإصلاح الجذري (v0.6.8) بنسخة مجسّمة: الضبط الصريح للسرعة الزاوية
-        // كل خطوة فيزيائية — أي دوران ضخّه تصادم يموت فوراً في الخطوة التالية
-        rb.angularVelocity = Vector3.up * (steerInput * maxTurnSpeed * speedFactor * reverse * turnScale);
-    }
-
-    void ApplyThrottleAndBrake()
-    {
-        Vector3 forward = transform.forward; forward.y = 0f; forward.Normalize();
-        Vector3 right = transform.right;     right.y = 0f;  right.Normalize();
-        Vector3 vel = rb.linearVelocity;     vel.y = 0f;
-
-        float forwardSpeed = Vector3.Dot(vel, forward);
-        float lateralSpeed = Vector3.Dot(vel, right);
-
-        float targetSpeed;
-        float rate;
-
-        if (holdingBrake)
-        {
-            // الفرامل توقف السيارة ثم ترجعها للخلف ببطء (أسلوب الموبايل)
-            targetSpeed = -maxReverseSpeed;
-            rate = brakeDeceleration;
-        }
-        else
-        {
-            // تسارع تلقائي دائم حتى السرعة القصوى
-            targetSpeed = currentMaxSpeed;
-            rate = acceleration;
-        }
-
-        float newForwardSpeed = Mathf.MoveTowards(forwardSpeed, targetSpeed, rate * Time.fixedDeltaTime);
-
-        rb.linearVelocity = forward * newForwardSpeed + right * lateralSpeed; // y يبقى صفراً
-    }
-
-    void ApplyLateralGripAndSpeedClamp()
-    {
-        Vector3 forward = transform.forward; forward.y = 0f; forward.Normalize();
-        Vector3 right = transform.right;     right.y = 0f;  right.Normalize();
-        Vector3 vel = rb.linearVelocity;     vel.y = 0f;
-
-        float forwardSpeed = Vector3.Dot(vel, forward);
-        float lateralSpeed = Vector3.Dot(vel, right);
-
-        // إخماد الانزلاق الجانبي تدريجياً (إحساس تماسك الإطارات)
-        lateralSpeed *= Mathf.Clamp01(1f - lateralGrip * Time.fixedDeltaTime);
-
-        Vector3 newVel = forward * forwardSpeed + right * lateralSpeed;
-
-        // حد أقصى صارم للسرعة
-        if (newVel.magnitude > currentMaxSpeed)
-            newVel = newVel.normalized * currentMaxSpeed;
-
-        rb.linearVelocity = newVel;
-    }
-
-    // ================= الحركة البصرية المجسّمة (v1.0.0) =================
-
-    void UpdateVisuals(float steerInput)
-    {
-        float dt = Time.fixedDeltaTime;
-
-        Vector3 vel = rb.linearVelocity; vel.y = 0f;
-        float fwdSpeed = Vector3.Dot(vel, transform.forward);
-
-        // 1) دوران العجلات مع السرعة (نصف قطر 0.30)
-        wheelSpin = Mathf.Repeat(wheelSpin + (fwdSpeed / 0.30f) * Mathf.Rad2Deg * dt, 360f);
-
-        // 2) توجيه العجلات الأماميتين مع التوجيه
-        float steerTarget = steerInput * 30f;
-        steerVisual = Mathf.Lerp(steerVisual, steerTarget, 1f - Mathf.Exp(-14f * dt));
-
-        for (int i = 0; i < 4; i++)
-        {
-            if (wheelPivots[i] == null) continue;
-            bool front = i < 2;
-            // Euler(spin حول X = محور العجلة، steer حول Y) — التوجيه خارج الدوران
-            wheelPivots[i].localRotation = Quaternion.Euler(wheelSpin, front ? steerVisual : 0f, 0f);
-        }
-
-        // 3) ميلان الهيكل: للخارج في المنعطفات + انحناء أمامي عند الفرملة
-        float rollTarget  = steerVisual * 0.10f;  // حتى ~3° للخارج
-        float pitchTarget = holdingBrake && fwdSpeed > 1f ? 1.8f : -0.6f;
-
-        rollCur  = Mathf.Lerp(rollCur,  rollTarget,  1f - Mathf.Exp(-8f * dt));
-        pitchCur = Mathf.Lerp(pitchCur, pitchTarget, 1f - Mathf.Exp(-8f * dt));
-
-        if (bodyPivot != null)
-            bodyPivot.localRotation = Quaternion.Euler(pitchCur, 0f, rollCur);
-    }
-
-    // ================= ربط الأزرار تلقائي =================
+    // ================= ربط الأزرار تلقائي (كما هو v0.6.8) =================
 
     void BindHoldButton(string buttonName, System.Action<bool> onStateChanged)
     {
@@ -512,67 +683,115 @@ public class CarController : MonoBehaviour
 
     // ================= واجهة للسكربتات الأخرى =================
 
-    /// <summary>تخفيض حد السرعة (العشب). مثال: 0.4 = 40% من السرعة القصوى.</summary>
+    /// <summary>تخفيض حد السرعة (العشب). مثال: 0.45 = 45% من السرعة القصوى.</summary>
     public void SetSpeedLimit(float multiplier)
     {
-        currentMaxSpeed = maxSpeed * Mathf.Clamp01(multiplier);
+        if (pcc != null && maxSpeedKmh > 1f)
+            pcc.maxSpeed = Mathf.Max(8, Mathf.RoundToInt(maxSpeedKmh * Mathf.Clamp01(multiplier)));
     }
 
     /// <summary>إرجاع حد السرعة الطبيعي (عند العودة إلى المسار).</summary>
     public void RestoreSpeedLimit()
     {
-        currentMaxSpeed = maxSpeed;
+        if (pcc != null && maxSpeedKmh > 1f)
+            pcc.maxSpeed = Mathf.RoundToInt(maxSpeedKmh);
     }
 
-    // ================= الضبط القابل للتخصيص (v0.8.0) =================
+    // ================= الضبط القابل للتخصيص (v0.8.0 → v1.1.0) =================
 
     public void ApplyTuning(int preset, float steerSens)
     {
-        float pMax, pAcc, pTurn, pGrip;
+        float pMax;   // كم/س
+        int   pAcc;   // معامل عزم Prometeo (1..10)
+        float pSteer; // سرعة عجلة القيادة (0.1..1)
+        float pAngle; // أقصى زاوية توجيه
 
         switch (Mathf.Clamp(preset, 0, 2))
         {
             case 1: // SPORT
-                pMax = 15.5f; pAcc = 12f; pTurn = 235f; pGrip = 6.6f;
+                pMax = 56f; pAcc = 12; pSteer = 0.65f; pAngle = 38f;
                 break;
             case 2: // TURBO
-                pMax = 17f;  pAcc = 14f; pTurn = 245f; pGrip = 5.6f;
+                pMax = 61f; pAcc = 14; pSteer = 0.72f; pAngle = 40f;
                 break;
             default: // STOCK
-                pMax = 14f;  pAcc = 10f; pTurn = 220f; pGrip = 6f;
+                pMax = 50f; pAcc = 10; pSteer = 0.58f; pAngle = 36f;
                 break;
         }
 
-        maxSpeed = pMax;
-        acceleration = pAcc;
-        maxTurnSpeed = pTurn * Mathf.Clamp(steerSens, 0.5f, 2f);
-        baseGrip = pGrip;
-        lateralGrip = pGrip * gripOverride;
+        maxSpeedKmh = pMax;
 
-        currentMaxSpeed = maxSpeed;
+        if (pcc != null)
+        {
+            pcc.maxSpeed = Mathf.RoundToInt(pMax);
+            pcc.maxReverseSpeed = 22;
+            pcc.accelerationMultiplier = Mathf.Clamp(pAcc, 1, 10);
+            pcc.steeringSpeed = Mathf.Clamp(pSteer * Mathf.Clamp(steerSens, 0.5f, 2f), 0.1f, 1f);
+            pcc.maxSteeringAngle = Mathf.RoundToInt(pAngle);
+            pcc.brakeForce = 450;
+            pcc.decelerationMultiplier = 2;
+            pcc.handbrakeDriftMultiplier = 5;
+            RestoreSpeedLimit();
+        }
+
+        ApplyGrip();
     }
 
     public void SetGripOverride(float multiplier)
     {
         gripOverride = Mathf.Clamp(multiplier, 0.1f, 2f);
-        lateralGrip = baseGrip * gripOverride;
+        ApplyGrip();
+    }
+
+    void ApplyGrip()
+    {
+        // تماسك WheelColliders الجانبي: نقص العشب يُطبَّق على عجلة القيادة الفيزيائية نفسها
+        for (int i = 0; i < 4; i++)
+        {
+            if (wheels[i] == null) continue;
+            WheelFrictionCurve f = wheels[i].sidewaysFriction;
+            f.stiffness = baseSidewaysStiffness * gripOverride;
+            wheels[i].sidewaysFriction = f;
+        }
     }
 
     /// <summary>
-    /// لون طلاء السيارة: يغيّر لون مادة الهيكل المجسّم ويحدّث اللون الأساس
-    /// لدى SurfaceChecker (تلطيخ العشب) عند عدم التواجد عليه.
+    /// لون السيارة: مع نموذج ARCADE نختار أقرب دهان مصنعي من النسخ الخمسة (نسيج حقيقي)،
+    /// ومع السيارة الإجرائية نلوّن مادة الهيكل مباشرة كما في v0.9.0.
     /// </summary>
     public void SetBodyColor(Color color)
     {
-        if (paintRenderer == null)
+        if (usingArcadeAsset && modelRoot != null)
         {
-            Transform t = transform.Find("BodyPivot/Paint");
-            if (t != null) paintRenderer = t.GetComponent<MeshRenderer>();
+            // تبديل كامل لخامة الطلاء إلى أقرب دهان مصنعي لاختيار اللاعب
+            ApplyArcadeMaterials(modelRoot, PlayerColorToVariant(color));
         }
-        if (paintRenderer != null) paintRenderer.material.color = color;
+        else if (paintRenderer != null)
+        {
+            paintRenderer.material.color = color;
+        }
 
-        if (surface == null) surface = GetComponent<SurfaceChecker>();
-        if (surface != null) surface.RefreshBaseColor();
+        if (TryGetComponent(out SurfaceChecker surface))
+            surface.RefreshBaseColor();
+    }
+
+    /// <summary>خريطة ألوان اللاعب الثمانية → دهانات ARCADE الخمسة (Col1..Col5).</summary>
+    static int PlayerColorToVariant(Color playerColor)
+    {
+        float h, s, v;
+        Color.RGBToHSV(playerColor, out h, out s, out v);
+
+        if (s < 0.25f) return 4;                          // أبيض/رمادي → Col4 (أقل تشبعاً)
+
+        float hue = h * 360f;
+        float[] hueCols = { 43f, 227f, 2f, 36f, 277f };   // Col1..Col5 (قياس الأنسجة)
+        float best = float.MaxValue; int variant = 1;
+        for (int i = 0; i < hueCols.Length; i++)
+        {
+            float d = Mathf.Abs(Mathf.DeltaAngle(hue, hueCols[i]));
+            if (d < best) { best = d; variant = i + 1; }
+        }
+        return variant;
     }
 
     /// <summary>شفافية أزرار القيادة من الإعدادات.</summary>

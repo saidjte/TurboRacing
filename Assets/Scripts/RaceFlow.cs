@@ -242,9 +242,8 @@ public class RaceFlow : MonoBehaviour
         }
         else
         {
-            carRb.constraints = RigidbodyConstraints.FreezePositionY |
-                                RigidbodyConstraints.FreezeRotationX |
-                                RigidbodyConstraints.FreezeRotationZ;
+            // (v1.1.0) فيزياء Prometeo الحقيقية: حرية كاملة (جاذبية + تعليق + نقل ثقل)
+            carRb.constraints = RigidbodyConstraints.None;
         }
     }
 

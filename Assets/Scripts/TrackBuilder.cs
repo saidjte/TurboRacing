@@ -397,6 +397,12 @@ public class TrackBuilder : MonoBehaviour
         float mz = -40f, Mz = H * tileSize + 40f;
         acc.AddTop(mx, Mx, mz, Mz, 0f, 1f / 3f, Color.white); // تكرار النسيج كل 3 أمتار
         EmitMesh(acc, matGround, "Ground", castShadows: false, makeStatic: true);
+
+        // (v1.1.0) مصادم الأرض للفيزياء الحقيقية (WheelColliders): صندوق واحد هائل
+        // سطحه العلوي عند مستوى الطريق (0.02) — العشب أسفله بـ 2سم فقط (فرق غير محسوس)
+        BoxCollider ground = gameObject.AddComponent<BoxCollider>();
+        ground.center = new Vector3((mx + Mx) * 0.5f, -0.5f + 0.02f, (mz + Mz) * 0.5f);
+        ground.size = new Vector3(Mx - mx, 1f, Mz - mz);
     }
 
     void BuildRoadAndStart()

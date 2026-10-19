@@ -13,6 +13,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # v1.1.0: Asset Store packages (ARCADE car + PROMETEO controller) live in a
+      # PRIVATE repo (Asset Store EULA forbids redistributing raw asset files in
+      # a public repo). They are fetched at build time and copied into Assets/.
+      - name: Checkout game assets (private)
+        uses: actions/checkout@v4
+        with:
+          repository: saidjte/TurboRacing-Assets
+          token: ${{ secrets.ASSETS_PAT }}
+          path: assets-repo
+
+      - name: Import assets into project
+        run: |
+          rsync -a assets-repo/Assets/ ./Assets/
+          echo "--- imported asset files ---"
+          find Assets/Resources/GameAssets Assets/Scripts/Prometeo -type f | sort
+
       - name: Cache Unity Library
         uses: actions/cache@v4
         with:
