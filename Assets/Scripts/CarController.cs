@@ -4,18 +4,20 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 /// <summary>
-/// TurboRacing - v1.1.0 (محرك PROMETEO: Car Controller)
+/// TurboRacing - v1.2.0 (محرك PROMETEO: Car Controller)
 /// واجهة قيادة (facade) تُبقي واجهتنا العامة المعتمدة كما هي، وداخلها الفيزياء الحقيقية
 /// من PrometeoCarController (WheelColliders + تعليق + نقل ثقل + انزلاق):
-/// - تسارع تلقائي دائم: GoForward() كل خطوة (نفس أسلوب اللعب المعتمد منذ v0.1.0)
+/// - قيادة يدوية كاملة (v1.2.0): زر بنزين GAS للتسارع — لم تعد السيارة تتحرك من تلقاء نفسها،
+///   وبدون ضغط تتدحرج وتتباطأ بأسلوب Prometeo الأصلي (DecelerateCar بإيقاعه المرجعي 0.1ث)
 /// - زر الفرامل: فرملة فعلية أثناء الحركة ثم رجوع بطيء عند التوقف تقريباً (أسلوب الموبايل)
+/// - تماسك إطارات مرفوع (v1.2.0): صلابة جانبية 1.8 ومنحنى أضيق = توجيه مثبت بلا انزلاق شديد
 /// - التوجيه: TurnLeft/TurnRight/ResetSteeringAngle من Prometeo مباشرة
 /// - وضع externalControl في نسخة Prometeo (تعديل مصرّح به ملاحظة المؤلف) يعطّل مدخلات
 ///   الكيبورد المدمجة ويُبقي حساب السرعة/الانزلاق وتحريك عجلات النموذج
 /// - إصلاح انقلاب ذاتي: لو انقلبت السيارة (فيزياء حقيقية) تعود واقفة بعد لحظة
 /// - عقاب العشب عبر SetSpeedLimit (حد السرعة) + SetGripOverride (تماسك WheelColliders)
 /// - لون السيارة: اختيار أقرب دهان من دهانات ARCADE الخمسة (نسيج حقيقي كامل)
-/// - أزرار اللمس + تتبع الأصابع (v0.6.8) كما هي حرفياً
+/// - أزرار اللمس + تتبع الأصابع (v0.6.8) + أيقونات مرسومة مستقلة عن الخطوط (v1.2.0)
 /// </summary>
 [RequireComponent(typeof(Rigidbody))]
 public class CarController : MonoBehaviour
@@ -24,6 +26,7 @@ public class CarController : MonoBehaviour
     private bool holdingLeft;
     private bool holdingRight;
     private bool holdingBrake;
+    private bool holdingGas;   // v1.2.0: القيادة اليدوية
 
     // --- تتبع اللمس لكل زر (v0.6.8 كما هو) ---
     private readonly Dictionary<string, HashSet<int>> holdPointers = new Dictionary<string, HashSet<int>>();
@@ -33,6 +36,8 @@ public class CarController : MonoBehaviour
     // --- التغذية البصرية للأزرار ---
     private static readonly Color SteerBaseColor    = new Color(0f, 0f, 0f, 0.35f);
     private static readonly Color SteerPressedColor = new Color(1f, 0.72f, 0.15f, 0.80f);
+    private static readonly Color GasBaseColor      = new Color(0.05f, 0.38f, 0.14f, 0.60f); // أخضر داكن
+    private static readonly Color GasPressedColor   = new Color(0.15f, 0.85f, 0.30f, 0.92f); // أخضر ساطع
     private static readonly Color BrakeBaseColor    = new Color(0.62f, 0.10f, 0.10f, 0.55f);
     private static readonly Color BrakePressedColor = new Color(1f, 0.25f, 0.18f, 0.90f);
 
@@ -58,6 +63,10 @@ public class CarController : MonoBehaviour
     // --- إصلاح الانقلاب ---
     private float flipTimer;
 
+    // --- التدحرج الطبيعي (v1.2.0): أسلوب Prometeo الأصلي لتباطؤ السيارة بلا مدخلات ---
+    private bool coasting;
+    const float CoastInvokeInterval = 0.1f; // الإيقاع المرجعي في Prometeo نفسه
+
     // خصائص للقراءة من سكربتات أخرى (الواجهة المعتمدة كما هي)
     public float SpeedKmh => pcc != null ? Mathf.Abs(pcc.carSpeed)
                                          : (rb != null ? rb.linearVelocity.magnitude * 3.6f : 0f);
@@ -66,6 +75,10 @@ public class CarController : MonoBehaviour
     /// <summary>السرعة الحالية نسبةً إلى الحد الأقصى (0..1) — للصوت والآثار.</summary>
     public float Speed01 => maxSpeedKmh > 1f ? Mathf.Clamp01(SpeedKmh / maxSpeedKmh) : 0f;
 
+    /// <summary>خصائص للقراءة من سكربتات أخرى (الواجهة المعتمدة كما هي).
+    /// هل اللاعب يضغط على البنزين الآن؟ (مفيد للصوت/HUD)</summary>
+    public bool IsAccelerating => holdingGas;
+    public bool IsBraking => holdingBrake && ForwardSpeed() > 0.5f;
     /// <summary>مُصدِّر مادة الطلاء (يستخدمه SurfaceChecker للتلطيخ على العشب).</summary>
     public MeshRenderer PaintRenderer => paintRenderer;
 
@@ -91,10 +104,15 @@ public class CarController : MonoBehaviour
         BindHoldButton("BtnLeft",  down => holdingLeft  = down);
         BindHoldButton("BtnRight", down => holdingRight = down);
         BindHoldButton("BtnBrake", down => holdingBrake = down);
+        BindHoldButton("BtnGas",   down => holdingGas   = down);
 
         ConfigureSteerIcon("BtnLeft",  pointRight: false);
         ConfigureSteerIcon("BtnRight", pointRight: true);
-        ConfigureButton("BtnBrake", "BRK", BrakeBaseColor, BrakePressedColor);
+
+        // البنزين والفرامل (v1.2.0): أيقونتان مرسومتان (مثلث لأعلى = تسارع، مربع = توقف)
+        // بنفس استراتيجية التحصين ضد أعطال الخطوط — ظهور مضمون على كل الأجهزة
+        ApplyHoldIcon("BtnGas",   UiKit.TriangleSpriteUp(), GasBaseColor,   GasPressedColor);
+        ApplyHoldIcon("BtnBrake", UiKit.SquareSprite(),     BrakeBaseColor, BrakePressedColor);
 
         // إعدادات اللاعب: الضبط + اللون + تخطيط الأزرار
         GameSettings.EnsureLoaded();
@@ -311,13 +329,17 @@ public class CarController : MonoBehaviour
 
             wc.mass = 20f;
             wc.wheelDampingRate = 0.25f;
-            wc.forwardFriction = MakeFriction(0.38f, 1f, 0.92f, 1f, 1f);
-            wc.sidewaysFriction = MakeFriction(0.30f, 1f, 0.86f, 1f, 1f);
+            // تماسك مرفوع (v1.2.0): علاج الانزلاق الشديد في المنعطفات —
+            // ذروة التماسك أبكر (extremumSlip أضيق) وبقوة أعلى، والذيل (asymptote)
+            // يحتفظ بقوة قريبة من الذروة فلا يفقد الإطار تماسكه فور تجاوز حد الانزلاق
+            wc.forwardFriction  = MakeFriction(0.32f, 1.05f, 0.82f, 0.98f, 1f);
+            wc.sidewaysFriction = MakeFriction(0.22f, 1.05f, 0.72f, 0.96f, 1f);
 
             wheels[i] = wc;
         }
 
-        baseSidewaysStiffness = 1f;
+        // صلابة جانبية أساسية مرفوعة (v1.2.0: 1.8 بدل 1.0) — العشب يضاعفها عبر SetGripOverride
+        baseSidewaysStiffness = 1.8f;
     }
 
 
@@ -384,6 +406,8 @@ public class CarController : MonoBehaviour
         if (Input.GetKeyUp(KeyCode.RightArrow)   || Input.GetKeyUp(KeyCode.D))   holdingRight = false;
         if (Input.GetKeyDown(KeyCode.Space)      || Input.GetKeyDown(KeyCode.S)) holdingBrake = true;
         if (Input.GetKeyUp(KeyCode.Space)        || Input.GetKeyUp(KeyCode.S))   holdingBrake = false;
+        if (Input.GetKeyDown(KeyCode.UpArrow)    || Input.GetKeyDown(KeyCode.W)) holdingGas   = true;
+        if (Input.GetKeyUp(KeyCode.UpArrow)      || Input.GetKeyUp(KeyCode.W))   holdingGas   = false;
 #endif
 
         // قسر تحرير الأزرار العالقة (v0.6.8)
@@ -398,7 +422,8 @@ public class CarController : MonoBehaviour
 
         if (frozen)
         {
-            // أثناء العد التنازلي/القائمة: لا عزم (الـ Rigidbody مجمّد أصلاً)
+            // أثناء العد التنازلي/القائمة: لا عزم ولا تدحرج (الـ Rigidbody مجمّد أصلاً)
+            SetCoasting(false);
             pcc.ThrottleOff();
             return;
         }
@@ -408,10 +433,12 @@ public class CarController : MonoBehaviour
         else if (holdingRight && !holdingLeft) pcc.TurnRight();
         else pcc.ResetSteeringAngle();
 
-        // --- التسارع التلقائي / الفرامل-الرجوع (الأسلوب المعتمد) ---
+        // --- القيادة اليدوية (v1.2.0): بنزين/فرامل/تدحرج طبيعي ---
         float fwd = ForwardSpeed();
         if (holdingBrake)
         {
+            // الفرامل تتفوق على البنزين دائماً (أمان)
+            SetCoasting(false);
             if (fwd > 1.2f)
             {
                 pcc.ThrottleOff();
@@ -422,13 +449,44 @@ public class CarController : MonoBehaviour
                 pcc.GoReverse();
             }
         }
+        else if (holdingGas)
+        {
+            // القيادة اليدوية: التسارع فقط أثناء الضغط على زر البنزين
+            SetCoasting(false);
+            pcc.GoForward();
+        }
         else
         {
-            pcc.GoForward(); // تسارع تلقائي دائم
+            // بلا مدخلات: تدحرج طبيعي — تباطؤ Prometeo المرجعي (DecelerateCar كل 0.1ث)
+            // يوقف السيارة كلياً تحت 0.25 م/ث ويلغي نفسه ذاتياً
+            SetCoasting(true);
         }
 
         UpdateDriftEffects();
         CheckFlipRecovery();
+    }
+
+    /// <summary>
+    /// تبديل وضع التدحرج الطبيعي (v1.2.0): تكرار DecelerateCar بإيقاع Prometeo المرجعي
+    /// (كل 0.1ث — لا أسرع) + تصفير الفرامل العالقة وعدم العزم فوراً عند الدخول في الوضع.
+    /// </summary>
+    void SetCoasting(bool on)
+    {
+        if (coasting == on) return;
+        coasting = on;
+        if (pcc == null) return;
+
+        if (on)
+        {
+            pcc.ThrottleOff();
+            for (int i = 0; i < 4; i++)
+                if (wheels[i] != null) wheels[i].brakeTorque = 0f; // لا فرامل عالقة أثناء التدحرج
+            pcc.InvokeRepeating("DecelerateCar", 0f, CoastInvokeInterval);
+        }
+        else
+        {
+            pcc.CancelInvoke("DecelerateCar");
+        }
     }
 
     float ForwardSpeed()
@@ -587,7 +645,17 @@ public class CarController : MonoBehaviour
         trigger.triggers.Add(entry);
     }
 
-    void ConfigureButton(string buttonName, string label, Color baseColor, Color pressedColor)
+    /// <summary>(v0.6.6) أيقونة سهم مرسومة لأزرار التوجيه — تغليف على المُوحّد العام.</summary>
+    void ConfigureSteerIcon(string buttonName, bool pointRight)
+    {
+        ApplyHoldIcon(buttonName, UiKit.TriangleSprite(pointRight), SteerBaseColor, SteerPressedColor);
+    }
+
+    /// <summary>
+    /// (v1.2.0) توحيد عام لأيقونات أزرار القيادة: ألوان أساس/ضغط + تعطيل النص القديم
+    /// + صورة أيقونة مركزية مولّدة برمجياً — مستقلة كلياً عن الخطوط فتظهر دائماً على كل الأجهزة.
+    /// </summary>
+    void ApplyHoldIcon(string buttonName, Sprite icon, Color baseColor, Color pressedColor)
     {
         GameObject buttonGO = GameObject.Find(buttonName);
         if (buttonGO == null) return;
@@ -601,40 +669,16 @@ public class CarController : MonoBehaviour
             pressedColors[buttonName] = pressedColor;
         }
 
-        Text text = buttonGO.GetComponentInChildren<Text>(true);
-        if (text == null) return;
-
-        text.text = label;
-        text.color = Color.white;
-        text.alignment = TextAnchor.MiddleCenter;
-        text.fontStyle = FontStyle.Bold;
-
-        RectTransform rt = buttonGO.GetComponent<RectTransform>();
-        if (rt != null) text.fontSize = Mathf.Max(24, Mathf.RoundToInt(rt.rect.height * 0.4f));
-    }
-
-    void ConfigureSteerIcon(string buttonName, bool pointRight)
-    {
-        GameObject buttonGO = GameObject.Find(buttonName);
-        if (buttonGO == null) return;
-
-        Image image = buttonGO.GetComponent<Image>();
-        if (image != null)
-        {
-            image.color = SteerBaseColor;
-            driveButtons[buttonName] = image;
-            baseColors[buttonName] = SteerBaseColor;
-            pressedColors[buttonName] = SteerPressedColor;
-        }
-
+        // تعطيل نص الزر القديم (كان يعتمد على الخط)
         Text oldText = buttonGO.GetComponentInChildren<Text>(true);
         if (oldText != null) oldText.gameObject.SetActive(false);
 
-        GameObject icon = new GameObject("ArrowIcon",
+        // الأيقونة (صورة مركزية لا تعترض اللمس)
+        GameObject iconGO = new GameObject("Icon",
             typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
-        icon.transform.SetParent(buttonGO.transform, false);
+        iconGO.transform.SetParent(buttonGO.transform, false);
 
-        RectTransform irt = icon.GetComponent<RectTransform>();
+        RectTransform irt = iconGO.GetComponent<RectTransform>();
         irt.anchorMin = new Vector2(0.5f, 0.5f);
         irt.anchorMax = new Vector2(0.5f, 0.5f);
         irt.pivot = new Vector2(0.5f, 0.5f);
@@ -646,8 +690,8 @@ public class CarController : MonoBehaviour
             side = Mathf.Min(brt.rect.width, brt.rect.height) * 0.38f;
         irt.sizeDelta = new Vector2(side, side);
 
-        Image img = icon.GetComponent<Image>();
-        img.sprite = UiKit.TriangleSprite(pointRight);
+        Image img = iconGO.GetComponent<Image>();
+        img.sprite = icon;
         img.color = Color.white;
         img.raycastTarget = false;
     }
@@ -667,7 +711,8 @@ public class CarController : MonoBehaviour
     /// <summary>تصفير كل المدخلات والألوان (بدء/إعادة سباق أو عودة للقائمة).</summary>
     public void ResetInput()
     {
-        holdingLeft = holdingRight = holdingBrake = false;
+        holdingLeft = holdingRight = holdingBrake = holdingGas = false;
+        SetCoasting(false);
 
         foreach (KeyValuePair<string, HashSet<int>> kv in holdPointers)
             kv.Value.Clear();
@@ -800,6 +845,7 @@ public class CarController : MonoBehaviour
         float op = Mathf.Clamp01(opacityMul);
         UpdateBaseColor("BtnLeft",  new Color(0f, 0f, 0f, 0.35f * op));
         UpdateBaseColor("BtnRight", new Color(0f, 0f, 0f, 0.35f * op));
+        UpdateBaseColor("BtnGas",   new Color(0.05f, 0.38f, 0.14f, 0.60f * op));
         UpdateBaseColor("BtnBrake", new Color(0.62f, 0.10f, 0.10f, 0.55f * op));
     }
 

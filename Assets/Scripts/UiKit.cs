@@ -85,6 +85,8 @@ public static class UiKit
     // سبرايتات الأسهم المرسومة (مستقلة عن الخطوط)
     static Sprite cachedArrowLeft;
     static Sprite cachedArrowRight;
+    static Sprite cachedArrowUp;   // v1.2.0: زر البنزين
+    static Sprite cachedSquare;    // v1.2.0: زر الفرامل
 
     /// <summary>سهم أبيض مرسوم بالكود (مثلث) — بديل مضمون عن نصوص أزرار التوجيه على كل الأجهزة (v0.6.6).</summary>
     public static Sprite TriangleSprite(bool pointRight)
@@ -113,6 +115,64 @@ public static class UiKit
         sp.name = pointRight ? "ArrowRight" : "ArrowLeft";
 
         if (pointRight) cachedArrowRight = sp; else cachedArrowLeft = sp;
+        return sp;
+    }
+
+    /// <summary>مثلث أبيض متجه لأعلى (v1.2.0) — أيقونة زر البنزين، مستقلة عن الخطوط.</summary>
+    public static Sprite TriangleSpriteUp()
+    {
+        if (cachedArrowUp != null) return cachedArrowUp;
+
+        const int N = 128;
+        Texture2D tex = new Texture2D(N, N, TextureFormat.RGBA32, false);
+        Color clear = new Color(0f, 0f, 0f, 0f);
+        Color[] pixels = new Color[N * N];
+        for (int i = 0; i < pixels.Length; i++) pixels[i] = clear;
+
+        // مثلث عمودي: القاعدة أسفل والرأس أعلى (اتجاه التسارع)
+        for (int y = 0; y < N; y++)
+        {
+            float t = 1f - y / (float)(N - 1);
+            int halfW = Mathf.RoundToInt(t * (N / 2 - 2));
+            for (int x = N / 2 - halfW; x <= N / 2 + halfW; x++)
+                pixels[y * N + x] = Color.white;
+        }
+
+        tex.SetPixels(pixels);
+        tex.Apply(false, false);
+        Sprite sp = Sprite.Create(tex, new Rect(0, 0, N, N), new Vector2(0.5f, 0.5f), N);
+        sp.name = "ArrowUp";
+        cachedArrowUp = sp;
+        return sp;
+    }
+
+    /// <summary>مربع أبيض صلب بحواف مشطوفة (v1.2.0) — أيقونة زر الفرامل (رمز التوقف).</summary>
+    public static Sprite SquareSprite()
+    {
+        if (cachedSquare != null) return cachedSquare;
+
+        const int N = 128;
+        Texture2D tex = new Texture2D(N, N, TextureFormat.RGBA32, false);
+        Color clear = new Color(0f, 0f, 0f, 0f);
+        Color[] pixels = new Color[N * N];
+        for (int i = 0; i < pixels.Length; i++) pixels[i] = clear;
+
+        int min = 16, max = N - 17;
+        int chamfer = 10; // قطع زوايا بسيط يمنح مظهر زر توقف ناعم
+        for (int y = min; y <= max; y++)
+        {
+            int inset = 0;
+            if (y < min + chamfer) inset = (min + chamfer) - y;
+            else if (y > max - chamfer) inset = y - (max - chamfer);
+            for (int x = min + inset; x <= max - inset; x++)
+                pixels[y * N + x] = Color.white;
+        }
+
+        tex.SetPixels(pixels);
+        tex.Apply(false, false);
+        Sprite sp = Sprite.Create(tex, new Rect(0, 0, N, N), new Vector2(0.5f, 0.5f), N);
+        sp.name = "StopSquare";
+        cachedSquare = sp;
         return sp;
     }
 

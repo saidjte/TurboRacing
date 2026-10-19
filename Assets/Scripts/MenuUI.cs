@@ -96,14 +96,14 @@ public class MenuUI : MonoBehaviour
             56, TextAnchor.MiddleCenter, UiKit.Amber, FontStyle.Bold).text = "HOW TO PLAY";
 
         string body =
-            "The car accelerates on its own - hold the arrow buttons (bottom left) to steer\n" +
-            "BRK (bottom right) brakes. Keep holding it to reverse out of tight spots\n" +
-            "Finish 3 laps to complete the race\n" +
-            "Grass slows you down to 45% speed\n" +
+            "MANUAL DRIVE: hold GAS (big green button, bottom right) to accelerate\n" +
+            "Release GAS to coast - the car slows down gently on its own\n" +
+            "Hold BRK (red button) to brake; keep holding it to reverse out of tight spots\n" +
+            "Steer with the two arrow buttons (bottom left)\n" +
+            "Finish 3 laps on the big wide circuit to complete the race\n" +
+            "Grass slows you down to 45% speed and reduces grip\n" +
             "Checkpoints will NOT count if you cut across the grass\n" +
-            "Your best lap is saved automatically\n" +
-            "SETTINGS: tune sound, buttons, paint and camera\n" +
-            "Tap the pause button (top right) or press ESC / Back to pause";
+            "SETTINGS: tune sound, buttons, paint and camera";
 
         UiKit.MakeText(panel, "HowBody",
             new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -110f), new Vector2(1140f, 480f),

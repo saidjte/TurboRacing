@@ -1,10 +1,10 @@
 using UnityEngine;
 
 /// <summary>
-/// TurboRacing - v0.8.0
+/// TurboRacing - v0.8.0 (مطوّر v1.2.0)
 /// تخطيط أزرار القيادة القابل للتخصيص (يستدعى من GameSettings.ApplyButtons):
-/// - الحجم القياسي: زرا توجيه مجمّعان أسفل اليسار + الفرامل أسفل اليمين
-/// - SwapButtons: تبديل الجانبين للاعبين اليساريين (توجيه يمين + فرامل يسار)
+/// - الحجم القياسي: زرا توجيه مجمّعان أسفل اليسار + البنزين (الأكبر) أسفل اليمين والفرامل على يساره
+/// - SwapButtons: تبديل الجانبين للاعبين اليساريين (توجيه يمين + بنزين/فرامل يسار)
 /// - BtnScale: تكبير/تصغير الأزرار (عبر localScale — كل المحتوى الداخلي يتبعها)
 /// - BtnOpacity: شفافية الأزرار (عبر CarController.ApplyButtonOpacity)
 /// ملاحظة: المراجع تُخزَّن عند أول تطبيق ناجح (الأزرار نشطة وقت الإقلاع) حتى
@@ -17,11 +17,12 @@ public static class DriveButtonsLayout
     const float SteerX1 = 250f;
     const float SteerX2 = 580f;
     const float SteerAnchorX = 0f;   // يسار
-    const float BrakeX = 250f;
-    const float BrakeAnchorX = 1f;   // يمين
+    const float GasX = 250f;         // من الحافة اليمنى (v1.2.0)
+    const float BrakeX = 640f;       // من الحافة اليمنى، على يسار البنزين
+    const float PedalAnchorX = 1f;   // يمين
     const float Y = 240f;
 
-    static RectTransform cLeft, cRight, cBrake;
+    static RectTransform cLeft, cRight, cBrake, cGas;
 
     /// <summary>
     /// تطبيق التخطيط من الإعدادات الحالية.
@@ -32,7 +33,7 @@ public static class DriveButtonsLayout
         GameSettings.EnsureLoaded();
 
         CacheButtons();
-        if (cLeft == null || cRight == null || cBrake == null) return;
+        if (cLeft == null || cRight == null || cBrake == null || cGas == null) return;
 
         bool swap = GameSettings.SwapButtons;
 
@@ -40,12 +41,15 @@ public static class DriveButtonsLayout
         PlaceSteer(cLeft, swap, 0);
         PlaceSteer(cRight, swap, 1);
 
-        // الفرامل: يمين الشاشة افتراضياً، يسارها عند التبديل
-        float bax = swap ? 0f : BrakeAnchorX;
-        float bpx = swap ? BrakeX : -BrakeX;
-        cBrake.anchorMin = new Vector2(bax, 0f);
-        cBrake.anchorMax = new Vector2(bax, 0f);
-        cBrake.anchoredPosition = new Vector2(bpx, Y);
+        // البنزين (الأكبر، أقرب للحافة) والفرامل (على يساره):
+        // يمين الشاشة افتراضياً، يسارها عند التبديل
+        float pax = swap ? 0f : PedalAnchorX;
+        cGas.anchoredPosition   = new Vector2(swap ?  GasX : -GasX, Y);
+        cBrake.anchoredPosition = new Vector2(swap ? BrakeX : -BrakeX, Y);
+        cGas.anchorMin = new Vector2(pax, 0f);
+        cGas.anchorMax = new Vector2(pax, 0f);
+        cBrake.anchorMin = new Vector2(pax, 0f);
+        cBrake.anchorMax = new Vector2(pax, 0f);
 
         // الحجم
         float s = Mathf.Clamp(GameSettings.BtnScale, 0.5f, 2f);
@@ -53,6 +57,7 @@ public static class DriveButtonsLayout
         cLeft.localScale = scl;
         cRight.localScale = scl;
         cBrake.localScale = scl;
+        cGas.localScale = scl;
 
         // الشفافية (تحتاج سيارة لتعديل ألوان الأساس المخزنة)
         if (car == null)
@@ -77,9 +82,10 @@ public static class DriveButtonsLayout
 
     static void CacheButtons()
     {
-        if (cLeft == null) cLeft = FindBtnRT("BtnLeft");
+        if (cLeft == null)  cLeft  = FindBtnRT("BtnLeft");
         if (cRight == null) cRight = FindBtnRT("BtnRight");
         if (cBrake == null) cBrake = FindBtnRT("BtnBrake");
+        if (cGas == null)   cGas   = FindBtnRT("BtnGas");
     }
 
     static RectTransform FindBtnRT(string name)

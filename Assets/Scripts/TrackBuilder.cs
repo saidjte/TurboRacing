@@ -2,14 +2,15 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// TurboRacing - v1.0.0 (لعبة ثلاثية الأبعاد حقيقية)
+/// TurboRacing - v1.0.0 (لعبة ثلاثية الأبعاد حقيقية) — مطوّرة v1.2.0 (حلبة أكبر وأعرض)
 /// يبني الحلبة كعالم مجسّم كامل بالكود (بلا أي أصول خارجية):
 /// - أرضية عشب واسعة بنسيج مكرر (خطوط جز + حبيبات)
 /// - طريق إسفلت كشبكة واحدة + خط بداية/نهاية مربعات كُرْد
 /// - كيرب أحمر/أبيض مرفوع 7سم على كل حواف الطريق
 /// - حواجز خرسانية مجسّمة (صناديق بظلال حقيقية) بنفس تخطيط الخريطة القديم حرفياً
 /// - أشجار (جذع + تُيج) ومدرّجات جمهور ولوحات إعلانات وبوابة انطلاق
-/// - نفس البوابات الأربع ونقطة الانطلاق واستعلام IsGrass — اللعب لم يتغير
+/// - v1.2.0: حلبة 72×44 بلاطة (144×88 متراً — مساحة ×2.5) وطريق عرضه 6 بلاطات (12 متراً)
+///   مع إعادة تموضع كل الديكور (أشجار/مدرّجات/لوحات/بوابة) وبوابات اللفة والانطلاق
 /// أداءً: كل النوع الواحد مدموج في شبكة واحدة = دورة رسم قليلة جداً.
 /// </summary>
 public class TrackBuilder : MonoBehaviour
@@ -17,7 +18,7 @@ public class TrackBuilder : MonoBehaviour
     public static TrackBuilder Instance { get; private set; }
 
     [Header("أبعاد البلاطة")]
-    [Tooltip("حجم البلاطة بالوحدات العالمية (2 = طريق عرضه 8 أمتار)")]
+    [Tooltip("حجم البلاطة بالوحدات العالمية (2 = طريق عرضه 12 متراً بالخريطة الجديدة)")]
     public float tileSize = 2f;
 
     // --- نقطة الانطلاق (تُحسب تلقائياً من الخريطة) ---
@@ -45,9 +46,10 @@ public class TrackBuilder : MonoBehaviour
 
     public LapGate[] LapGates { get; private set; }
 
-    // --- أبعاد خريطة الحلبة بالبلاطات ---
-    const int W = 46;
-    const int H = 28;
+    // --- أبعاد خريطة الحلبة بالبلاطات (v1.2.0: أكبر وأعرض) ---
+    const int W = 72;    // 144 متراً عالمياً
+    const int H = 44;    // 88 متراً عالمياً
+    const int RoadW = 6; // عرض الطريق بالبلاطات (12 متراً)
 
     // رموز الخريطة: '#' جدار   '.' عشب   'R' طريق   'S' خط البداية
     const char WallChar = '#';
@@ -81,7 +83,7 @@ public class TrackBuilder : MonoBehaviour
         Debug.Log($"[TrackBuilder] الحلبة ثلاثية الأبعاد جاهزة: {W}×{H} بلاطة، انطلاق من {StartPosition}");
     }
 
-    // ================= تصميم الحلبة (كما هو — اللعب ثابت) =================
+    // ================= تصميم الحلبة (v1.2.0: أكبر وأعرض) =================
 
     static char[,] BuildMap()
     {
@@ -89,29 +91,29 @@ public class TrackBuilder : MonoBehaviour
 
         Fill(m, GrassChar);
 
-        // المستقيمات الأربعة (عرض 4 بلاطات)
-        Rect(m, RoadChar, 3, 2, 40, 4);    // العلوي
-        Rect(m, RoadChar, 3, 22, 40, 4);   // السفلي
-        Rect(m, RoadChar, 3, 2, 4, 24);    // الأيسر
-        Rect(m, RoadChar, 39, 2, 4, 24);   // الأيمن
+        // المستقيمات الأربعة (عرض 6 بلاطات) — فراغ 2 بلاطة بين كل مستقيم والجدار
+        Rect(m, RoadChar, 3, 2, 66, RoadW);    // السفلي (z منخفض)
+        Rect(m, RoadChar, 3, 36, 66, RoadW);   // العلوي (خط البداية)
+        Rect(m, RoadChar, 3, 2, RoadW, 40);    // الأيسر
+        Rect(m, RoadChar, 63, 2, RoadW, 40);   // الأيمن
 
         // الجدار الخارجي المحيط بكل شيء
         Ring(m, WallChar, 0, 0, W, H);
 
-        // جدار الجزيرة العشبية الداخلية
-        Ring(m, WallChar, 8, 8, 30, 12);
+        // جدار الجزيرة العشبية الداخلية (فراغ عشبي 2 بلاطة حولها)
+        Ring(m, WallChar, 10, 10, 52, 24);
 
-        // مشدّد علوي: يضيّق الطريق من 4 بلاطات إلى 2
-        Rect(m, WallChar, 12, 4, 6, 2);
+        // مشدّد سفلي: يضيّق الطريق إلى 4 بلاطات (فراغ مريح 8 أمتار للمرور)
+        Rect(m, WallChar, 24, 6, 8, 2);
 
-        // مشدّد سفلي: يضيّق الطريق إلى 3 بلاطات
-        Rect(m, WallChar, 20, 21, 8, 2);
+        // مشدّد علوي: يضيّق الطريق إلى 5 بلاطات (فراغ 10 أمتار) — غرب خط البداية
+        Rect(m, WallChar, 16, 35, 12, 2);
 
-        // خط البداية/النهاية: عمودان مقلّمان على المستقيم السفلي
-        for (int y = 22; y <= 25; y++)
+        // خط البداية/النهاية: عمودان مقلّمان على المستقيم العلوي (وسطه تقريباً)
+        for (int z = 36; z <= 41; z++)
         {
-            m[30, y] = StartChar;
-            m[31, y] = StartChar;
+            m[36, z] = StartChar;
+            m[37, z] = StartChar;
         }
 
         return m;
@@ -140,26 +142,37 @@ public class TrackBuilder : MonoBehaviour
         Rect(m, c, x + w - 1, y, 1, h);  // العمود الأيمن
     }
 
-    // ================= نقطة الانطلاق (كما هي) =================
+    // ================= نقطة الانطلاق (v1.2.0) =================
 
     void ComputeStartPose()
     {
-        // أمام السيارة خط البداية مباشرة (العمودان 30-31 على المستقيم السفلي)
-        float startX = 28f * tileSize + tileSize * 0.5f; // مركز العمود 28
-        float startZ = 23f * tileSize + tileSize * 0.5f; // مركز الصف 23
+        // أمام السيارة خط البداية مباشرة (العمودان 36-37 على المستقيم العلوي)
+        float startX = 34f * tileSize + tileSize * 0.5f; // مركز العمود 34
+        float startZ = 39f * tileSize;                   // وسط طريق الـ 6 صفوف (z 72..84)
 
         StartPosition = new Vector3(startX, 0f, startZ);
-        StartYaw = 90f; // transform.forward يشير نحو +X => انطلاق شرقاً (في الفضاء المجسّم)
+        StartYaw = 90f; // transform.forward يشير نحو +X => انطلاق شرقاً (السباق مع عقارب الساعة)
     }
 
+    /// <summary>
+    /// بوابات اللفة بإحداثيات عالمية (v1.2.0، بلاطة 2 متر):
+    ///   المستقيم العلوي z 72..84 ، السفلي z 4..16 ، الأيمن x 126..138 ، الأيسر x 6..18
+    /// اتجاه السباق: شرقاً على العلوي ← جنوباً على الأيمن ← غرباً على السفلي ← شمالاً على الأيسر.
+    /// نطاق كل بوابة = مدى مركز السيارة على الطريق بالضبط (الطريق مزاحاً نصف بلاطة من كل جهة)
+    /// فلا يُحتسب أي موقع خارج الإسفلت ولا تُفوّت أي لفة صحيحة.
+    /// [0] يمين: عبور Z=44 هبوطاً (X من 126.5 إلى 137.5)
+    /// [1] أسفل: عبور X=72 يساراً وسط المستقيم السفلي (Z من 4.5 إلى 15.5)
+    /// [2] يسار: عبور Z=44 صعوداً (X من 6.5 إلى 17.5)
+    /// [3] نهاية: عبور X=74 يميناً وسط خط البداية المقلّم (Z من 72.5 إلى 83.5)
+    /// </summary>
     void BuildLapGates()
     {
         LapGates = new[]
         {
-            new LapGate { axis = 1, plane = 24f, spanMin = 77f,   spanMax = 87f,   dir = -1 },
-            new LapGate { axis = 0, plane = 48f, spanMin = 3f,    spanMax = 13f,   dir = -1 },
-            new LapGate { axis = 1, plane = 24f, spanMin = 5f,    spanMax = 15f,   dir = +1 },
-            new LapGate { axis = 0, plane = 62f, spanMin = 43.5f, spanMax = 52.5f, dir = +1 }
+            new LapGate { axis = 1, plane = 44f, spanMin = 126.5f, spanMax = 137.5f, dir = -1 },
+            new LapGate { axis = 0, plane = 72f, spanMin = 4.5f,   spanMax = 15.5f,  dir = -1 },
+            new LapGate { axis = 1, plane = 44f, spanMin = 6.5f,   spanMax = 17.5f,  dir = +1 },
+            new LapGate { axis = 0, plane = 74f, spanMin = 72.5f,  spanMax = 83.5f,  dir = +1 }
         };
     }
 
@@ -422,8 +435,8 @@ public class TrackBuilder : MonoBehaviour
 
                 if (c == StartChar)
                 {
-                    // uv متصل عبر البلاطات حتى يستمر نمط الكُرْد عبر الشريط كله
-                    float u = (x - 30f), v = (z - 22f);
+                    // uv متصل عبر البلاطات حتى يستمر نمط الكُرْد عبر الشريط كله (v1.2.0: مرجع العمود 36/الصف 36)
+                    float u = (x - 36f), v = (z - 36f);
                     start.AddQuad(
                         new Vector3(x0, 0.02f, z0), new Vector3(x0, 0.02f, z1),
                         new Vector3(x1, 0.02f, z1), new Vector3(x1, 0.02f, z0),
@@ -600,7 +613,7 @@ public class TrackBuilder : MonoBehaviour
         }
     }
 
-    // ================= ديكور مجسّم (مادة ملوّنة رأسياً واحدة) =================
+    // ================= ديكور مجسّم (مادة ملوّنة رأسياً واحدة) — مواضع v1.2.0 =================
 
     void BuildScenery()
     {
@@ -614,48 +627,48 @@ public class TrackBuilder : MonoBehaviour
         Color roofRed = new Color(0.80f, 0.22f, 0.18f);
         Color postCol = new Color(0.35f, 0.36f, 0.38f);
 
-        // --- أشجار الجزيرة الداخلية ---
-        for (int i = 0; i < 11; i++)
+        // --- أشجار الجزيرة الداخلية (الجزيرة الآن x 20..124 ، z 20..68) ---
+        for (int i = 0; i < 16; i++)
         {
-            float tx = rng.Next(22, 70) + (float)rng.NextDouble();
-            float tz = rng.Next(20, 36) + (float)rng.NextDouble();
+            float tx = rng.Next(26, 118) + (float)rng.NextDouble();
+            float tz = rng.Next(24, 64) + (float)rng.NextDouble();
             AddTree(acc, new Vector3(tx, 0f, tz), 0.85f + (float)rng.NextDouble() * 0.5f,
                     rng.NextDouble() < 0.5 ? leafA : leafB, trunk);
         }
 
         // --- أشجار خارج الجدار (أفق المشهد) ---
-        for (int i = 0; i < 7; i++)
+        for (int i = 0; i < 8; i++)
         {
-            float x = 6f + rng.Next(0, 84);
-            if (x > 28f && x < 54f) x += 40f; // إبعاد عن المدرّج الشمالي
+            float x = 6f + rng.Next(0, 132);
+            if (x > 40f && x < 92f) x += 50f; // إبعاد عن المدرّج الشمالي
             AddTree(acc, new Vector3(x, 0f, -4f - rng.Next(0, 7)),
                     1.0f + (float)rng.NextDouble() * 0.5f,
                     rng.NextDouble() < 0.5 ? leafA : leafB, trunk);
         }
 
-        for (int i = 0; i < 6; i++)
+        for (int i = 0; i < 8; i++)
         {
-            float x = 6f + rng.Next(0, 84);
-            if (x > 18f && x < 48f) x += 40f; // إبعاد عن المدرّج الجنوبي
-            AddTree(acc, new Vector3(x, 0f, 60f + rng.Next(0, 7)),
+            float x = 6f + rng.Next(0, 132);
+            if (x > 30f && x < 60f) x += 45f; // إبعاد عن المدرّج عند خط البداية
+            AddTree(acc, new Vector3(x, 0f, 92f + rng.Next(0, 7)),
                     1.0f + (float)rng.NextDouble() * 0.5f,
                     rng.NextDouble() < 0.5 ? leafA : leafB, trunk);
         }
 
         for (int i = 0; i < 4; i++)
         {
-            AddTree(acc, new Vector3(-4f - rng.Next(0, 6), 0f, 6f + rng.Next(0, 44)),
+            AddTree(acc, new Vector3(-4f - rng.Next(0, 6), 0f, 6f + rng.Next(0, 76)),
                     1.0f + (float)rng.NextDouble() * 0.4f, leafB, trunk);
-            AddTree(acc, new Vector3(W * tileSize + 4f + rng.Next(0, 6), 0f, 6f + rng.Next(0, 44)),
+            AddTree(acc, new Vector3(W * tileSize + 4f + rng.Next(0, 6), 0f, 6f + rng.Next(0, 76)),
                     1.0f + (float)rng.NextDouble() * 0.4f, leafA, trunk);
         }
 
-        // --- مدرّج جمهور جنوبي (يطل على المستقيم السفلي — يواجه -Z) ---
-        AddGrandstand(acc, new Vector3(33f, 0f, 60.5f), 20f, concrete, roofRed, postCol, rng, facePositiveZ: false);
-        // --- مدرّج شمالي (يطل على المستقيم العلوي — يواجه +Z) ---
-        AddGrandstand(acc, new Vector3(41f, 0f, -5.5f), 18f, concrete, roofRed, postCol, rng, facePositiveZ: true);
+        // --- مدرّج جمهور عند خط البداية (يطل على المستقيم العلوي — يواجه -Z) ---
+        AddGrandstand(acc, new Vector3(45f, 0f, 92.5f), 22f, concrete, roofRed, postCol, rng, facePositiveZ: false);
+        // --- مدرّج جنوبي (يطل على المستقيم السفلي — يواجه +Z) ---
+        AddGrandstand(acc, new Vector3(66f, 0f, -6.5f), 22f, concrete, roofRed, postCol, rng, facePositiveZ: true);
 
-        // --- لوحات إعلانات على جدار الجزيرة (تواجه المستقيمين) ---
+        // --- لوحات إعلانات على حواف الجزيرة (تواجه المستقيمين) ---
         Color[] boardCols =
         {
             new Color(0.90f, 0.30f, 0.25f),
@@ -665,20 +678,20 @@ public class TrackBuilder : MonoBehaviour
             new Color(0.90f, 0.45f, 0.15f)
         };
         for (int i = 0; i < 4; i++)
-            AddBillboard(acc, new Vector3(24f + i * 15f, 0f, 41.1f), 0f, boardCols[i % boardCols.Length], postCol);
+            AddBillboard(acc, new Vector3(62f + i * 20f, 0f, 70.1f), 0f, boardCols[i % boardCols.Length], postCol);
         for (int i = 0; i < 3; i++)
-            AddBillboard(acc, new Vector3(27f + i * 15f, 0f, 15.2f), 0f, boardCols[(i + 2) % boardCols.Length], postCol);
+            AddBillboard(acc, new Vector3(30f + i * 20f, 0f, 18.1f), 0f, boardCols[(i + 2) % boardCols.Length], postCol);
 
-        // --- بوابة الانطلاق: عمودان + لافتة مقلّمة تعلو السيارة ---
-        float gx = 62f;
-        acc.AddBox(new Vector3(gx, 2.6f, 42.6f), new Vector3(0.55f, 5.2f, 0.55f), 0.5f, Color.white, concrete);
-        acc.AddBox(new Vector3(gx, 2.6f, 53.4f), new Vector3(0.55f, 5.2f, 0.55f), 0.5f, Color.white, concrete);
+        // --- بوابة الانطلاق: عمودان + لافتة مقلّمة تعلو السيارة (خط البداية x 72..76) ---
+        float gx = 74f;
+        acc.AddBox(new Vector3(gx, 2.6f, 70.6f), new Vector3(0.55f, 5.2f, 0.55f), 0.5f, Color.white, concrete);
+        acc.AddBox(new Vector3(gx, 2.6f, 85.4f), new Vector3(0.55f, 5.2f, 0.55f), 0.5f, Color.white, concrete);
         for (int i = 0; i < 6; i++)
         {
-            float z0 = 42.6f + i * (10.8f / 6f);
+            float z0 = 70.6f + i * (14.8f / 6f);
             Color c = (i & 1) == 0 ? roofRed : Color.white;
-            acc.AddBox(new Vector3(gx, 4.65f, z0 + (10.8f / 12f)),
-                       new Vector3(0.4f, 1.0f, 10.8f / 6f), 0.5f, c, c * 0.85f);
+            acc.AddBox(new Vector3(gx, 4.65f, z0 + (14.8f / 12f)),
+                       new Vector3(0.4f, 1.0f, 14.8f / 6f), 0.5f, c, c * 0.85f);
         }
 
         EmitMesh(acc, matPaint, "Scenery", castShadows: true, makeStatic: true);

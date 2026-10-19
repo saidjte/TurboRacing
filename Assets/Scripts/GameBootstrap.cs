@@ -247,9 +247,10 @@ public class GameBootstrap : MonoBehaviour
 
         RectTransform canvasRT = canvasGO.GetComponent<RectTransform>();
 
-        // التخطيط القياسي لألعاب السباق بالتسارع التلقائي:
+        // التخطيط القياسي لألعاب السباق بالقيادة اليدوية (v1.2.0):
         // - زرا التوجيه مجمّعان معاً أسفل اليسار (إبهام أيسر واحد يوجه)
-        // - زر الفرامل كبير أسفل اليمين (إبهام أيمن يفرمل)
+        // - زر البنزين GAS كبير أسفل اليمين ملاصق للحافة (الإبهام الأيمن يقود)
+        // - زر الفرامل BRK أصغر على يسار GAS (المرور عليه بسرعة عند الحاجة)
         CreateButton(canvasRT, "BtnLeft",
             new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(0.5f, 0.5f),
             new Vector2(250f, 240f), new Vector2(300f, 300f));
@@ -258,9 +259,14 @@ public class GameBootstrap : MonoBehaviour
             new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(0.5f, 0.5f),
             new Vector2(580f, 240f), new Vector2(300f, 300f));
 
-        CreateButton(canvasRT, "BtnBrake",
+        // اليمين: البنزين (الأكبر - الزر الأساسي) ثم الفرامل على يساره
+        CreateButton(canvasRT, "BtnGas",
             new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(0.5f, 0.5f),
             new Vector2(-250f, 240f), new Vector2(340f, 340f));
+
+        CreateButton(canvasRT, "BtnBrake",
+            new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(0.5f, 0.5f),
+            new Vector2(-640f, 240f), new Vector2(280f, 280f));
     }
 
     void CreateButton(RectTransform parent, string name,
