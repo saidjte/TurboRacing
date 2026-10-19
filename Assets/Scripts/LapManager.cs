@@ -20,13 +20,13 @@ public class LapManager : MonoBehaviour
     const string BestKey = "TR_BestLapMs";
     const string TotalKey = "TR_TotalLaps";
 
-    Rigidbody2D carRb;
+    Rigidbody carRb;
     TrackBuilder track;
 
     int progress;            // فهرس البوابة التالية (0..2 = نقاط التفتيش)
     bool timing;             // هل بدأ التوقيت؟
     float lapStartTime;
-    float prevX, prevY;
+    float prevX, prevZ;
 
     public int LapsCompleted { get; private set; }
     public float CurrentLapTime => timing ? Time.time - lapStartTime : 0f;
@@ -65,10 +65,10 @@ public class LapManager : MonoBehaviour
             return;
         }
 
-        carRb = car.GetComponent<Rigidbody2D>();
+        carRb = car.GetComponent<Rigidbody>();
         track = TrackBuilder.Instance;
         prevX = carRb.position.x;
-        prevY = carRb.position.y;
+        prevZ = carRb.position.z;
     }
 
     /// <summary>
@@ -89,7 +89,7 @@ public class LapManager : MonoBehaviour
         if (carRb != null)
         {
             prevX = carRb.position.x;
-            prevY = carRb.position.y;
+            prevZ = carRb.position.z;
         }
     }
 
@@ -97,13 +97,13 @@ public class LapManager : MonoBehaviour
     {
         if (carRb == null || track == null || track.LapGates == null) return;
 
-        Vector2 p = carRb.position;
+        Vector3 p = carRb.position;
 
         // المرحلة 4: العد يعمل أثناء السباق الفعلي فقط
         if (RaceFlow.Instance != null && RaceFlow.Instance.State != RaceState.Racing)
         {
             prevX = p.x;
-            prevY = p.y;
+            prevZ = p.z;
             return;
         }
 
@@ -115,14 +115,14 @@ public class LapManager : MonoBehaviour
         CheckGate(track.LapGates[3], p, onCheckpoint: false);
 
         prevX = p.x;
-        prevY = p.y;
+        prevZ = p.z;
     }
 
-    void CheckGate(TrackBuilder.LapGate gate, Vector2 p, bool onCheckpoint)
+    void CheckGate(TrackBuilder.LapGate gate, Vector3 p, bool onCheckpoint)
     {
-        float prevA = gate.axis == 0 ? prevX : prevY;
-        float curA  = gate.axis == 0 ? p.x : p.y;
-        float other = gate.axis == 0 ? p.y : p.x;
+        float prevA = gate.axis == 0 ? prevX : prevZ;
+        float curA  = gate.axis == 0 ? p.x : p.z;
+        float other = gate.axis == 0 ? p.z : p.x;
 
         // عبور المستوى بالاتجاه المطلوب فقط
         bool crossed = gate.dir > 0

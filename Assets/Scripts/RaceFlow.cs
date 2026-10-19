@@ -27,7 +27,7 @@ public class RaceFlow : MonoBehaviour
     int lastBeepSecond; // (v0.7.0) آخر ثانية عُزفت لها نقرة عد تنازلي
 
     GameObject car;
-    Rigidbody2D carRb;
+    Rigidbody carRb;
     GameObject gameCanvas;   // أزرار القيادة اللمسية
     CameraFollow camFollow;
 
@@ -39,7 +39,7 @@ public class RaceFlow : MonoBehaviour
     void Start()
     {
         car = GameObject.Find("Car");
-        if (car != null) carRb = car.GetComponent<Rigidbody2D>();
+        if (car != null) carRb = car.GetComponent<Rigidbody>();
         gameCanvas = GameObject.Find("GameCanvas");
         camFollow = Object.FindFirstObjectByType<CameraFollow>();
 
@@ -213,18 +213,18 @@ public class RaceFlow : MonoBehaviour
         if (carCtrl != null) carCtrl.ResetInput();
 
         Vector3 pos = TrackBuilder.Instance.StartPosition;
-        float rot = TrackBuilder.Instance.StartRotationZ;
+        float yaw = TrackBuilder.Instance.StartYaw;
 
         if (carRb != null)
         {
             carRb.position = pos;
-            carRb.rotation = rot;
-            carRb.linearVelocity = Vector2.zero;
-            carRb.angularVelocity = 0f; // (v0.6.8) لا دوران متبقٍ من السباق السابق
+            carRb.rotation = Quaternion.Euler(0f, yaw, 0f);
+            carRb.linearVelocity = Vector3.zero;
+            carRb.angularVelocity = Vector3.zero; // لا دوران متبقٍ من السباق السابق
         }
 
         car.transform.position = pos;
-        car.transform.rotation = Quaternion.Euler(0f, 0f, rot);
+        car.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
     }
 
     void SetCarFrozen(bool frozen)

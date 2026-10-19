@@ -39,7 +39,7 @@ public class MenuUI : MonoBehaviour
 
         UiKit.MakeText(root, "Subtitle",
             new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -345f), new Vector2(1400f, 60f),
-            38, TextAnchor.MiddleCenter, new Color(1f, 1f, 1f, 0.75f)).text = "THIRD-PERSON 2D RACING";
+            38, TextAnchor.MiddleCenter, new Color(1f, 1f, 1f, 0.75f)).text = "REAL 3D RACING";
 
         statsText = UiKit.MakeText(root, "Stats",
             new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -430f), new Vector2(1500f, 70f),

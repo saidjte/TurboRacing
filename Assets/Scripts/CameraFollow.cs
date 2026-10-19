@@ -1,56 +1,45 @@
 using UnityEngine;
 
 /// <summary>
-/// TurboRacing - v0.5.0 (منظور الشخص الثالث)
-/// كاميرا مطاردة مائلة (Chase Camera) للسباق:
-/// - كاميرا منظورية (Perspective) خلف السيارة بميلان ~55° حول محور العرض
-/// - الدوران مقفول على اتجاه السيارة (Orientation Lock): السيارة تسير دائماً نحو أعلى الشاشة
-///   والطريق أمامها يظهر بعمق متناقص (تأثير شبه ثلاثي الأبعاد)
-/// - نقطة النظرة أمام السيارة (Look-Ahead) لرؤية الطريق القادم مع تنعيم مزدوج (نقطة + دوران)
-/// - وضع القائمة (Overview): عودة للعلوية الأورثوغرافية لتأطير الحلبة كاملة
+/// TurboRacing - v1.0.0 (لعبة ثلاثية الأبعاد حقيقية)
+/// كاميرا مطاردة مجسّمة حقيقية:
+/// - وضع السباق: كاميرا منظورية منخفضة خلف السيارة (ميلان ~20°) — تظهر السماء
+///   والأفق والأشجار والمدرّجات = إحساس عمق ثلاثي الأبعاد كامل
+///   (نقطة نظرة أمام السيارة + تنعيم مزدوج: الموضع والدوران + مسافة قابلة للضبط)
+/// - وضع القائمة: منظور علوي مائل يؤطر الحلبة كاملة (يُحسب من أبعاد الحلبة
+///   ومجال الرؤية ونسبة الشاشة) — يبقى مجسّماً (ليس أورثوغرافياً)
+/// - ضبط الضباب حسب الوضع (ضباب قريب سينمائي في السباق، شبه معدوم في القائمة)
+/// - اهتزاز التصادم + إعدادات اللاعب (مسافة/تعطيل) كما في v0.8.0
 /// </summary>
 public class CameraFollow : MonoBehaviour
 {
-    /// <summary>(v0.7.0) مرجع ساكن لاستدعاء الاهتزاز من CarController.</summary>
     public static CameraFollow Instance { get; private set; }
 
     [Header("وضع المطاردة (منظور الشخص الثالث)")]
-    [Tooltip("تفعيل كاميرا المطاردة المائلة (false = متابعة علوية كلاسيكية)")]
-    public bool thirdPerson = true;
-
-    [Tooltip("زاوية الميلان بالدرجات (0 = مسطحة تماماً، 90 = علوية كاملة)")]
-    public float chasePitchDeg = 55f;
+    [Tooltip("زاوية الميلان بالدرجات (0 = أفقية تماماً، 90 = علوية كاملة)")]
+    public float chasePitchDeg = 20f;
 
     [Tooltip("بعد الكاميرا عن نقطة النظرة (وحدات عالمية)")]
-    public float chaseDistance = 9f;
+    public float chaseDistance = 10.5f;
 
     [Tooltip("مجال الرؤية للكاميرا المنظورية")]
-    public float chaseFov = 55f;
+    public float chaseFov = 58f;
 
-    [Tooltip("مسافة نقطة النظرة أمام السيارة (كلما زادت بدت السيارة أسفل الشاشة)")]
-    public float chaseLookAhead = 4f;
+    [Tooltip("مسافة نقطة النظرة أمام السيارة")]
+    public float chaseLookAhead = 5f;
+
+    [Tooltip("ارتفاع نقطة النظرة فوق الأرض")]
+    public float chasePivotHeight = 1.2f;
 
     [Tooltip("سرعة تتبع دوران الكاميرا لاتجاه السيارة (أكبر = أسرع)")]
-    public float yawLerp = 10f;
+    public float yawLerp = 7f;
 
-    [Header("وضع القائمة (Overview)")]
-    [Tooltip("بُعد الكاميرا في المحور Z (لا تغيّره)")]
-    public float cameraZ = -10f;
-
+    [Header("عام")]
     [Tooltip("نعومة متابعة نقطة النظرة")]
-    public float smoothTime = 0.1f;
-
-    // --- احتياطي: متابعة علوية كلاسيكية عندما thirdPerson = false ---
-    [Tooltip("ثواني التقدم للأمام بناء على سرعة السيارة (0 لإيقافه)")]
-    public float lookAheadSeconds = 0.3f;
-
-    [Tooltip("أقصى مسافة تقدم للأمام")]
-    public float maxLookAhead = 5f;
+    public float smoothTime = 0.09f;
 
     private Transform target;
-    private Rigidbody2D targetRb;
     private Camera cam;
-    private float followOrthoSize = 7f;
     private bool inOverview;
 
     // حالة وضع المطاردة
@@ -58,14 +47,17 @@ public class CameraFollow : MonoBehaviour
     private Vector3 pivotVel;
     private float smoothYaw;
     private bool yawInit;
-    private Vector3 legacyVel;
 
-    // (v0.8.0) إعدادات اللاعب: مسافة الكاميرا + اهتزاز التصادم
+    // (v0.8.0) إعدادات اللاعب
     private float zoomMul = 1f;
     private bool shakeEnabled = true;
 
-    // (v0.7.0) اهتزاز التصادم: سعة حالية تتلاشى أُسّياً
+    // (v0.7.0) اهتزاز التصادم
     private float shakeAmp;
+
+    // ألوان السماء/الضباب (يضبطها GameBootstrap؛ نعدّل مدى الضباب فقط عند التبديل)
+    const float ChaseFogStart = 55f,  ChaseFogEnd = 170f;
+    const float MenuFogStart  = 160f, MenuFogEnd  = 520f;
 
     void Awake()
     {
@@ -75,24 +67,18 @@ public class CameraFollow : MonoBehaviour
     void Start()
     {
         cam = GetComponent<Camera>();
-        if (cam != null) followOrthoSize = cam.orthographicSize;
+        if (cam != null) cam.fieldOfView = chaseFov;
 
         GameObject car = GameObject.Find("Car");
         if (car != null)
         {
             target = car.transform;
-            targetRb = car.GetComponent<Rigidbody2D>();
         }
         else
         {
             Debug.LogWarning("[CameraFollow] لم أجد كائناً باسم 'Car' - تأكد من تسمية السيارة بالضبط.");
         }
 
-        // محاذاة فورية عند بداية المشهد
-        if (target != null)
-            transform.position = new Vector3(target.position.x, target.position.y, cameraZ);
-
-        // (v0.8.0) سحب إعدادات الكاميرا المحفوظة (نموذج السحب = لا مشاكل ترتيب)
         GameSettings.EnsureLoaded();
         ApplyZoom(GameSettings.CamZoom);
         ApplyShake(GameSettings.CamShake);
@@ -112,114 +98,98 @@ public class CameraFollow : MonoBehaviour
 
     /// <summary>
     /// تبديل بين وضعي الكاميرا:
-    /// true  = القائمة (علوية أورثوغرافية تؤطر الحلبة)
-    /// false = السباق (منظور شخص ثالث منظوري مائل)
+    /// true  = القائمة (منظور علوي مائل يأطر الحلبة)
+    /// false = السباق (مطاردة منخفضة خلف السيارة)
     /// </summary>
     public void SetOverviewMode(bool overview)
     {
         inOverview = overview;
         if (cam == null) cam = GetComponent<Camera>();
 
-        if (overview)
-        {
-            if (cam != null) cam.orthographic = true;
-        }
-        else
-        {
-            if (cam != null && thirdPerson)
-            {
-                cam.orthographic = false;
-                cam.fieldOfView = chaseFov;
-            }
+        // مدى الضباب حسب الوضع (القائمة تحتاج شفافية كاملة للحلبة)
+        RenderSettings.fogStartDistance = overview ? MenuFogStart : ChaseFogStart;
+        RenderSettings.fogEndDistance   = overview ? MenuFogEnd   : ChaseFogEnd;
 
+        if (!overview)
+        {
             // التقاط فوري لنقطة النظرة والاتجاه (بدون انزلاق من وضع القائمة)
             yawInit = false;
             pivotVel = Vector3.zero;
-            legacyVel = Vector3.zero;
             if (target != null)
-                smoothPivot = target.position + target.up * chaseLookAhead;
+            {
+                Vector3 fwd = target.forward; fwd.y = 0f; fwd.Normalize();
+                smoothPivot = target.position + Vector3.up * chasePivotHeight + fwd * chaseLookAhead;
+                smoothYaw = target.eulerAngles.y;
+                yawInit = true;
+            }
         }
     }
 
     void LateUpdate()
     {
-        // ================= وضع القائمة: تأطير الحلبة كاملة =================
+        // ================= وضع القائمة: منظور علوي مائل يأطر الحلبة =================
         if (inOverview)
         {
             TrackBuilder tb = TrackBuilder.Instance;
-            if (tb == null || cam == null) return;
+            if (tb == null) return;
 
-            float needHeight = tb.MapHeightUnits * 0.55f;
-            float needWidth = tb.MapWidthUnits / (2f * Mathf.Max(0.8f, cam.aspect)) * 1.02f;
-            cam.orthographicSize = Mathf.Max(needHeight, needWidth);
+            if (cam != null)
+            {
+                float halfV = Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
+                float aspect = Mathf.Max(0.6f, cam.aspect);
 
-            transform.position = new Vector3(tb.MapCenter.x, tb.MapCenter.y, cameraZ);
+                // عمق الحلبة يُرى مائلاً (عامل 0.72) والعرض بالكامل
+                float needV = (tb.MapHeightUnits * 0.72f) / halfV;
+                float needH = (tb.MapWidthUnits * 0.55f) / (halfV * aspect);
+                float h = Mathf.Max(needV, needH) * 1.04f;
+
+                Vector3 c = tb.MapCenter;
+                transform.position = new Vector3(c.x, h, c.z - h * 0.48f);
+                transform.rotation = Quaternion.LookRotation((c + Vector3.up * 1.5f) - transform.position, Vector3.up);
+            }
             return;
         }
 
         if (target == null) return;
 
-        // ================= منظور الشخص الثالث: كاميرا مطاردة =================
-        if (thirdPerson)
+        // ================= مطاردة منخفضة خلف السيارة =================
+        float dt = Time.deltaTime;
+
+        // نقطة النظرة أمام السيارة مع تنعيم
+        Vector3 carFwd = target.forward; carFwd.y = 0f; carFwd.Normalize();
+        Vector3 pivot = target.position + Vector3.up * chasePivotHeight + carFwd * chaseLookAhead;
+
+        if (!yawInit)
         {
-            float dt = Time.deltaTime;
-
-            // نقطة النظرة أمام السيارة مع تنعيم
-            Vector3 pivot = target.position + target.up * chaseLookAhead;
-            if (!yawInit)
-            {
-                smoothPivot = pivot;
-                smoothYaw = target.rotation.eulerAngles.z;
-                yawInit = true;
-            }
-            smoothPivot = Vector3.SmoothDamp(smoothPivot, pivot, ref pivotVel, smoothTime);
-
-            // دوران الكاميرا مع اتجاه السيارة (تنعيم أُسّي مستقر مع أي معدل إطارات)
-            float targetYaw = target.rotation.eulerAngles.z;
-            smoothYaw = Mathf.LerpAngle(smoothYaw, targetYaw, 1f - Mathf.Exp(-yawLerp * dt));
-
-            // ميلان حول محور العرض (النظر لأسفل نحو الطريق) ثم دوران مع السيارة:
-            // forward = sin(pitch)·اتجاه السيارة + cos(pitch)·نحو المشهد
-            // وبالتالي الكاميرا تقع خلف السيارة وعلى جهة المشاهد تماماً
-            Quaternion rot = Quaternion.Euler(0f, 0f, smoothYaw) * Quaternion.Euler(-chasePitchDeg, 0f, 0f);
-            Vector3 forward = rot * Vector3.forward;
-            Vector3 pos = smoothPivot - forward * (chaseDistance * zoomMul); // (v0.8.0) مسافة قابلة للضبط
-
-            // (v0.7.0) اهتزاز التصادم: إزاحة عشوائية صغيرة تتلاشى أُسّياً
-            if (shakeAmp > 0.001f)
-            {
-                pos += new Vector3(Random.Range(-1f, 1f), Random.Range(-1f, 1f), 0f) * shakeAmp;
-                shakeAmp *= Mathf.Exp(-6f * dt);
-            }
-            else
-            {
-                shakeAmp = 0f;
-            }
-
-            transform.SetPositionAndRotation(pos, rot);
-            return;
+            smoothPivot = pivot;
+            smoothYaw = target.eulerAngles.y;
+            yawInit = true;
         }
 
-        // ================= احتياطي: متابعة علوية كلاسيكية =================
-        if (cam != null) cam.orthographicSize = followOrthoSize * zoomMul;
+        smoothPivot = Vector3.SmoothDamp(smoothPivot, pivot, ref pivotVel, smoothTime);
 
-        Vector3 goal = target.position;
+        // دوران الكاميرا مع اتجاه السيارة (تنعيم أُسّي مستقر مع أي معدل إطارات)
+        float targetYaw = target.eulerAngles.y;
+        smoothYaw = Mathf.LerpAngle(smoothYaw, targetYaw, 1f - Mathf.Exp(-yawLerp * dt));
 
-        // تقدم بسيط نحو اتجاه الحركة يجعل المتابعة أنعم
-        if (targetRb != null && lookAheadSeconds > 0f)
+        Quaternion rot = Quaternion.Euler(chasePitchDeg, smoothYaw, 0f);
+        Vector3 pos = smoothPivot - rot * Vector3.forward * (chaseDistance * zoomMul);
+
+        // (v0.7.0) اهتزاز التصادم: إزاحة عشوائية صغيرة تتلاشى أُسّياً
+        if (shakeAmp > 0.001f)
         {
-            Vector3 ahead = targetRb.linearVelocity * lookAheadSeconds;
-            if (ahead.magnitude > maxLookAhead)
-                ahead = ahead.normalized * maxLookAhead;
-            goal += ahead;
+            pos += new Vector3(Random.Range(-1f, 1f), Random.Range(-1f, 1f) * 0.6f, Random.Range(-1f, 1f)) * shakeAmp;
+            shakeAmp *= Mathf.Exp(-6f * dt);
+        }
+        else
+        {
+            shakeAmp = 0f;
         }
 
-        goal.z = cameraZ;
-        transform.position = Vector3.SmoothDamp(transform.position, goal, ref legacyVel, smoothTime);
+        transform.SetPositionAndRotation(pos, rot);
     }
 
-    /// <summary>(v0.7.0) دفعة اهتزاز (تُستخدم أكبر قيمة إذا تزامنت دفعات).
-    /// (v0.8.0) احترام إعداد تعطيل الاهتزاز من صفحة الإعدادات.</summary>
+    /// <summary>(v0.7.0) دفعة اهتزاز (تُستخدم أكبر قيمة إذا تزامنت دفعات).</summary>
     public void Shake(float amp)
     {
         if (!shakeEnabled) return;

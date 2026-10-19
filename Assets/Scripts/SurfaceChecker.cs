@@ -1,9 +1,9 @@
 using UnityEngine;
 
 /// <summary>
-/// TurboRacing - المرحلة 2
-/// يراقب البلاطة تحت السيارة كل إطار فيزياء:
-/// - على العشب: خفض حد السرعة + تقليل تماسك الإطارات + تلويث لون السيارة
+/// TurboRacing - v1.0.0 (نفس سلوك v0.8.0 على الفضاء المجسّم)
+/// يراقب السطح تحت السيارة كل إطار فيزياء:
+/// - على العشب: خفض حد السرعة + تقليل تماسك الإطارات + تعتيم طلاء الهيكل المجسّم
 /// - العودة للطريق: استعادة كل شيء تلقائياً
 /// ملاحظة: الجدران تمنع الخروج من الحلبة أصلاً، والعقاب مخصص للعشب بين الكيرب والجدران.
 /// </summary>
@@ -17,26 +17,29 @@ public class SurfaceChecker : MonoBehaviour
     [Tooltip("مضاعف تماسك الإطارات على العشب (انزلاق أكثر = فرملة أضعف على التوجيه)")]
     public float grassGripMultiplier = 0.6f;
 
-    /// <summary>هل السيارة على العشب الآن؟ (مفيد للـ HUD في المراحل القادمة)</summary>
+    /// <summary>هل السيارة على العشب الآن؟ (يستخدمه الصوت/HUD)</summary>
     public bool OnGrass { get; private set; }
 
     CarController car;
-    SpriteRenderer sr;
+    MeshRenderer paint;
     Color baseColor;
+    bool hasBase;
 
     void Awake()
     {
         car = GetComponent<CarController>();
-        // (v0.8.0) الرسم انتقل إلى الأبناء: CarBody (الهيكل الملوّن) + CarTrim (التفاصيل)
-        sr = GetComponentInChildren<SpriteRenderer>();
-        if (sr != null) baseColor = sr.color;
     }
 
-    /// <summary>(v0.8.0) تحديث اللون الأساس بعد تغيير طلاء السيارة من الإعدادات
+    /// <summary>تحديث اللون الأساس بعد تغيير طلاء السيارة من الإعدادات
     /// (يُتجاهل أثناء التواجد على العشب حتى لا يُلتقط اللون المتلطّخ).</summary>
     public void RefreshBaseColor()
     {
-        if (sr != null && !OnGrass) baseColor = sr.color;
+        if (paint == null) paint = car.PaintRenderer;
+        if (paint != null && !OnGrass)
+        {
+            baseColor = paint.material.color;
+            hasBase = true;
+        }
     }
 
     void FixedUpdate()
@@ -48,17 +51,25 @@ public class SurfaceChecker : MonoBehaviour
 
         OnGrass = grass;
 
+        if (paint == null) paint = car.PaintRenderer;
+
         if (grass)
         {
+            if (paint != null && !hasBase) { baseColor = paint.material.color; hasBase = true; }
+
             car.SetSpeedLimit(grassSpeedMultiplier);
-            car.SetGripOverride(grassGripMultiplier); // (v0.8.0) يُركَّب فوق تماسك مستوى الضبط
-            if (sr != null) sr.color = new Color(baseColor.r * 0.6f, baseColor.g * 0.6f, baseColor.b * 0.6f, 1f); // يبدو "متسخاً" (بلا شفافية)
+            car.SetGripOverride(grassGripMultiplier);
+
+            // يبدو "متسخاً" (تعتيم الطلاء بلا شفافية)
+            if (paint != null)
+                paint.material.color = new Color(baseColor.r * 0.55f, baseColor.g * 0.55f, baseColor.b * 0.55f, 1f);
         }
         else
         {
             car.RestoreSpeedLimit();
             car.SetGripOverride(1f);
-            if (sr != null) sr.color = baseColor;
+
+            if (paint != null && hasBase) paint.material.color = baseColor;
         }
     }
 }

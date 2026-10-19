@@ -1,33 +1,28 @@
-using UnityEngine;
-using UnityEngine.Tilemaps;
 using System.Collections.Generic;
+using UnityEngine;
 
 /// <summary>
-/// TurboRacing - v0.9.0 (المظهر شبه ثلاثي الأبعاد للحلبة)
-/// يبني حلبة سباق كاملة بالكود عبر Tilemap حقيقي (بدون أي أصول خارجية) — نفس
-/// الخريطة والبوابات والتصادم القديمة حرفياً (اللعب لم يتغير إطلاقاً)، لكن:
-/// - كل البلاطات 128×128 بفلتر Bilinear (مظهر ناعم بدل البكسلي المسطح)
-/// - الجدران: وجوه علوية إسمنتية بحواف مشطوفة (Bevel) = صناديق حواجز مجسمة
-/// - ظلال ملقاة: كل جدار يرمي ظلاً متدرجاً جنوباً وشرقاً (شمس من الشمال الغربي)
-///   على الطريق والعشب — أقوى إشارة ارتفاع في المنظور العلوي
-/// - العشب: خطوط جز بمائلة مستمرة عبر الخريطة + بقع ورُبُع وزهور نادرة
-/// - الإسفلت: بقع قيمة كبيرة + حصى + شقوق + إطار AO عند الكيرب
-/// - أشجار مظللة (تاج طبقي + ظل أرضي) على الهوامش وبالجزيرة الداخلية
-/// - بوابة بداية: قاعدتا أعمدة + لافتة مقلّمة تعلو السيارة عند العبور
-/// - حلقة طلاء بيضاء في الجزيرة (لمسة مدرسة سباق)
-/// يعرّض نقطة انطلاق السيارة + استعلام IsGrass لعقاب العشب.
+/// TurboRacing - v1.0.0 (لعبة ثلاثية الأبعاد حقيقية)
+/// يبني الحلبة كعالم مجسّم كامل بالكود (بلا أي أصول خارجية):
+/// - أرضية عشب واسعة بنسيج مكرر (خطوط جز + حبيبات)
+/// - طريق إسفلت كشبكة واحدة + خط بداية/نهاية مربعات كُرْد
+/// - كيرب أحمر/أبيض مرفوع 7سم على كل حواف الطريق
+/// - حواجز خرسانية مجسّمة (صناديق بظلال حقيقية) بنفس تخطيط الخريطة القديم حرفياً
+/// - أشجار (جذع + تُيج) ومدرّجات جمهور ولوحات إعلانات وبوابة انطلاق
+/// - نفس البوابات الأربع ونقطة الانطلاق واستعلام IsGrass — اللعب لم يتغير
+/// أداءً: كل النوع الواحد مدموج في شبكة واحدة = دورة رسم قليلة جداً.
 /// </summary>
 public class TrackBuilder : MonoBehaviour
 {
     public static TrackBuilder Instance { get; private set; }
 
     [Header("أبعاد البلاطة")]
-    [Tooltip("حجم البلاطة بالوحدات العالمية (2 = طريق عرضه 4 بلاطات يسمح بمناورة مريحة)")]
+    [Tooltip("حجم البلاطة بالوحدات العالمية (2 = طريق عرضه 8 أمتار)")]
     public float tileSize = 2f;
 
     // --- نقطة الانطلاق (تُحسب تلقائياً من الخريطة) ---
     public Vector3 StartPosition { get; private set; }
-    public float StartRotationZ { get; private set; }
+    public float StartYaw { get; private set; }
 
     // --- أبعاد عالمية للكاميرا (وضع القائمة) ---
     public Vector3 MapCenter { get; private set; }
@@ -36,8 +31,8 @@ public class TrackBuilder : MonoBehaviour
 
     /// <summary>
     /// بوابات اللفة: محور + مستوى عبور + نطاق على المحور الآخر + اتجاه.
-    /// axis: 0 = X ، 1 = Y. dir: +1/-1 اتجاه العبور الصحيح.
-    /// [0..2] نقاط تفتيش إلزامية، [3] خط النهاية.
+    /// axis: 0 = X ، 1 = Z. dir: +1/-1 اتجاه العبور الصحيح.
+    /// [0..2] نقاط تفتيش إلزامية، [3] خط النهاية. (نفس قيم v0.6.x حرفياً)
     /// </summary>
     public struct LapGate
     {
@@ -53,7 +48,6 @@ public class TrackBuilder : MonoBehaviour
     // --- أبعاد خريطة الحلبة بالبلاطات ---
     const int W = 46;
     const int H = 28;
-    const int Tex = 128; // دقة نسيج البلاطة (v0.9.0: 128 بدل 64)
 
     // رموز الخريطة: '#' جدار   '.' عشب   'R' طريق   'S' خط البداية
     const char WallChar = '#';
@@ -61,43 +55,30 @@ public class TrackBuilder : MonoBehaviour
     const char RoadChar = 'R';
     const char StartChar = 'S';
 
-    Tilemap grassMap;
-    Tilemap roadMap;
-    Tilemap wallMap;
-    Tilemap shadowMap;
+    char[,] map;
+    Material matGround, matRoad, matStart, matCurb, matWall, matPaint;
 
     void Awake()
     {
         Instance = this;
 
-        char[,] map = BuildMap();
+        map = BuildMap();
+        EnsureMaterials();
 
-        // شبكة الحلبة
-        GameObject gridGO = new GameObject("TrackGrid");
-        gridGO.transform.SetParent(transform, false);
-
-        Grid grid = gridGO.AddComponent<Grid>();
-        grid.cellSize = new Vector3(tileSize, tileSize, 0f);
-
-        grassMap  = CreateLayer(gridGO, "GrassTiles",  -5, withColliders: false);
-        roadMap   = CreateLayer(gridGO, "RoadTiles",    0, withColliders: false);
-        shadowMap = CreateLayer(gridGO, "ShadowTiles",  2, withColliders: false); // (v0.9.0)
-        wallMap   = CreateLayer(gridGO, "WallTiles",    5, withColliders: true);
-
-        Paint(map);
-        PaintWallShadows(map);   // (v0.9.0) ظلال الجدران على الأرض
-        AddInfieldDeco();        // (v0.9.0) حلقة طلاء بيضاء
-        AddTrees(map);           // (v0.9.0) أشجار مظللة
-        AddStartGantry();        // (v0.9.0) بوابة خط البداية
+        BuildGround();
+        BuildRoadAndStart();
+        BuildCurbs();
+        BuildWalls();
+        BuildScenery();
+        BuildWallColliders();
         ComputeStartPose();
         BuildLapGates();
 
-        // أبعاد عالمية (كاميرا القائمة)
         MapWidthUnits = W * tileSize;
         MapHeightUnits = H * tileSize;
-        MapCenter = new Vector3(MapWidthUnits * 0.5f, MapHeightUnits * 0.5f, 0f);
+        MapCenter = new Vector3(MapWidthUnits * 0.5f, 0f, MapHeightUnits * 0.5f);
 
-        Debug.Log($"[TrackBuilder] الحلبة جاهزة: {W}×{H} بلاطة، انطلاق من {StartPosition}");
+        Debug.Log($"[TrackBuilder] الحلبة ثلاثية الأبعاد جاهزة: {W}×{H} بلاطة، انطلاق من {StartPosition}");
     }
 
     // ================= تصميم الحلبة (كما هو — اللعب ثابت) =================
@@ -159,281 +140,16 @@ public class TrackBuilder : MonoBehaviour
         Rect(m, c, x + w - 1, y, 1, h);  // العمود الأيمن
     }
 
-    // ================= الرسم على الطبقات =================
-
-    void Paint(char[,] map)
-    {
-        Tile grassA = MakeTile(GrassTexture(0), "GrassTileA");
-        Tile grassB = MakeTile(GrassTexture(1), "GrassTileB");
-        Tile roadA  = MakeTile(RoadTexture(0),  "RoadTileA");
-        Tile roadB  = MakeTile(RoadTexture(1),  "RoadTileB");
-        Tile curbA  = MakeTile(CurbTexture(0),  "CurbTileA");
-        Tile curbB  = MakeTile(CurbTexture(1),  "CurbTileB");
-        Tile startTile = MakeTile(CheckerTexture(), "StartTile");
-        Tile wallA  = MakeTile(WallTexture(0),  "WallTileA");
-        Tile wallB  = MakeTile(WallTexture(1),  "WallTileB");
-
-        for (int x = 0; x < W; x++)
-        {
-            for (int y = 0; y < H; y++)
-            {
-                Vector3Int cell = new Vector3Int(x, y, 0);
-                bool alt = ((x + y) & 1) == 0;
-
-                // العشب يغطي كل الأرض كطبقة أساس (نسختان لكسر الرتابة)
-                grassMap.SetTile(cell, alt ? grassA : grassB);
-
-                char c = map[x, y];
-                // تنويع زائف للنسخ الثاني (بذرة مختلفة لكل بلاطة)
-                bool v2 = ((x * 7 + y * 13) & 1) == 0;
-
-                if (c == RoadChar)
-                {
-                    bool edge = IsRoadEdge(map, x, y);
-                    roadMap.SetTile(cell, edge ? (v2 ? curbA : curbB) : (v2 ? roadA : roadB));
-                }
-                else if (c == StartChar)
-                    roadMap.SetTile(cell, startTile);
-                else if (c == WallChar)
-                    wallMap.SetTile(cell, alt ? wallA : wallB);
-            }
-        }
-    }
-
-    /// <summary>بلاطة طريق مجاورة لأي شيء ليس طريقاً = حافة => كيرب أحمر/أبيض.</summary>
-    static bool IsRoadEdge(char[,] map, int x, int y)
-    {
-        return !IsRoadLike(map, x + 1, y) ||
-               !IsRoadLike(map, x - 1, y) ||
-               !IsRoadLike(map, x, y + 1) ||
-               !IsRoadLike(map, x, y - 1);
-    }
-
-    static bool IsRoadLike(char[,] map, int x, int y)
-    {
-        if (x < 0 || y < 0 || x >= W || y >= H) return false;
-        char c = map[x, y];
-        return c == RoadChar || c == StartChar;
-    }
-
-    // ================= ظلال الجدران (v0.9.0) =================
-
-    /// <summary>
-    /// شمس من الشمال الغربي: كل بلاطة جدار مفتوحة من الجنوب ترمي ظلاً على الجار
-    /// الجنوبي (يتدلى من الحافة العلوية للبلاطة المظلولة)، ومفتوحة من الشرق ترمي
-    /// ظلاً على الجار الشرقي (من حافته اليسرى). الزاويتان تجمعان الظلين.
-    /// </summary>
-    void PaintWallShadows(char[,] map)
-    {
-        Tile shS  = MakeTile(ShadowTileTexture(false, true),  "WallShadowS");
-        Tile shE  = MakeTile(ShadowTileTexture(true,  false), "WallShadowE");
-        Tile shSE = MakeTile(ShadowTileTexture(true,  true),  "WallShadowSE");
-
-        for (int x = 0; x < W; x++)
-        {
-            for (int y = 0; y < H; y++)
-            {
-                if (map[x, y] != WallChar) continue;
-
-                bool south = Open(map, x, y - 1);
-                bool east  = Open(map, x + 1, y);
-
-                // ظل جنوبي: يلتصق بأعلى البلاطة الواقعة جنوب الجدار
-                if (south) shadowMap.SetTile(new Vector3Int(x, y - 1, 0), shS);
-                // ظل شرقي: يلتصق بيسار البلاطة الواقعة شرق الجدار
-                if (east) shadowMap.SetTile(new Vector3Int(x + 1, y, 0), shE);
-
-                // زاوية محدبة: البلاطة القطرية تستقبل الظل المزدوج (انحناء الظل حول الصندوق)
-                if (south && east && Open(map, x + 1, y - 1))
-                    shadowMap.SetTile(new Vector3Int(x + 1, y - 1, 0), shSE);
-            }
-        }
-    }
-
-    /// <summary>هل البلاطة أرض مفتوحة (عشب/طريق/بداية) يمكن أن يقع عليها ظل؟</summary>
-    static bool Open(char[,] map, int x, int y)
-    {
-        if (x < 0 || y < 0 || x >= W || y >= H) return false;
-        char c = map[x, y];
-        return c == GrassChar || c == RoadChar || c == StartChar;
-    }
-
-    // ================= الأشجار والديكور (v0.9.0) =================
-
-    void AddTrees(char[,] map)
-    {
-        Sprite blob = BlobSprite();
-        var rng = new System.Random(20240);
-        var taken = new List<Vector2Int>();
-
-        // 1) أشجار الجزيرة الداخلية (كبيرة)
-        int placed = 0;
-        for (int tries = 0; tries < 120 && placed < 9; tries++)
-        {
-            int x = rng.Next(10, 36);
-            int y = rng.Next(10, 18);
-            if (map[x, y] != GrassChar) continue;
-            if (!Open(map, x - 1, y) || !Open(map, x + 1, y) ||
-                !Open(map, x, y - 1) || !Open(map, x, y + 1)) continue;
-
-            bool far = true;
-            foreach (var t in taken)
-                if (Mathf.Abs(t.x - x) < 5 && Mathf.Abs(t.y - y) < 4) { far = false; break; }
-            if (!far) continue;
-
-            taken.Add(new Vector2Int(x, y));
-            float s = 1.0f + (float)rng.NextDouble() * 0.25f;
-            MakeTree(new Vector3((x + 0.5f) * tileSize, (y + 0.5f) * tileSize, 0f), s, blob, rng);
-            placed++;
-        }
-
-        // 2) هوامش خارجية: صف علوي (y=1) وصف سفلي (y=26) وأعمدة يسرى/يمنى (x=1,44)
-        var margin = new List<Vector2Int>();
-        for (int x = 4; x <= 42; x += 4) { margin.Add(new Vector2Int(x, 1)); margin.Add(new Vector2Int(x, 26)); }
-        for (int y = 4; y <= 24; y += 4) { margin.Add(new Vector2Int(1, y));  margin.Add(new Vector2Int(44, y)); }
-
-        foreach (var c in margin)
-        {
-            if (c.x < 0 || c.y < 0 || c.x >= W || c.y >= H) continue;
-            if (map[c.x, c.y] != GrassChar) continue;
-
-            int jx = c.x + rng.Next(-1, 2);
-            int jy = c.y + rng.Next(0, 2);
-            if (jx < 1 || jy < 1 || jx >= W - 1 || jy >= H - 1) continue;
-            if (map[jx, jy] != GrassChar) continue;
-
-            float s = 0.62f + (float)rng.NextDouble() * 0.22f;
-            MakeTree(new Vector3((jx + 0.5f) * tileSize, (jy + 0.5f) * tileSize, 0f), s, blob, rng);
-        }
-    }
-
-    /// <summary>شجرة: ظل أرضي (جنوب-شرق باتجاه الشمس) + تاج طبقي يعلو كل شيء.</summary>
-    void MakeTree(Vector3 pos, float scale, Sprite blob, System.Random rng)
-    {
-        GameObject tree = new GameObject("Tree");
-        tree.transform.SetParent(transform, false);
-        tree.transform.position = pos;
-
-        // الظل الأرضي
-        GameObject shGO = new GameObject("TreeShadow");
-        shGO.transform.SetParent(tree.transform, false);
-        SpriteRenderer shSR = shGO.AddComponent<SpriteRenderer>();
-        shSR.sprite = blob;
-        shSR.sortingOrder = 2;
-        shSR.color = new Color(0f, 0f, 0f, 0.36f);
-        shGO.transform.localPosition = new Vector3(0.50f, -0.62f, 0f);
-        shGO.transform.localScale = new Vector3(1.55f * scale, 1.15f * scale, 1f);
-
-        // التاج (فوق السيارة والجدران واللافتة: الشجرة أطول من الجميع)
-        GameObject topGO = new GameObject("TreeTop");
-        topGO.transform.SetParent(tree.transform, false);
-        SpriteRenderer sr = topGO.AddComponent<SpriteRenderer>();
-        sr.sprite = TreeSprite();
-        sr.sortingOrder = 12;
-        float g = 0.88f + (float)rng.NextDouble() * 0.12f;
-        sr.color = new Color(g, g, g, 1f); // تنويع خفيف بين الأشجار
-        topGO.transform.localScale = new Vector3(scale, scale, 1f);
-    }
-
-    void AddInfieldDeco()
-    {
-        // حلقة طلاء بيضاء باهتة وسط الجزيرة (لمسة مدارس السباق)
-        GameObject ringGO = new GameObject("PaintRing");
-        ringGO.transform.SetParent(transform, false);
-        ringGO.transform.position = new Vector3(46f, 28f, 0f);
-        SpriteRenderer sr = ringGO.AddComponent<SpriteRenderer>();
-        sr.sprite = PaintRingSprite();
-        sr.sortingOrder = 1;
-        sr.color = new Color(1f, 1f, 1f, 0.9f);
-        ringGO.transform.localScale = new Vector3(1.7f, 1.7f, 1f);
-    }
-
-    void AddStartGantry()
-    {
-        // خط البداية عند X≈62 (السيارة تعبر شرقاً) — اللافتة تعلو السيارة عند المرور
-        float gx = 62f;
-
-        Sprite blob = BlobSprite();
-        Sprite basePlate = PostBaseSprite();
-
-        foreach (float py in new float[] { 42.4f, 53.6f })
-        {
-            // ظل القاعدة
-            GameObject shGO = new GameObject("PostShadow");
-            shGO.transform.SetParent(transform, false);
-            shGO.transform.position = new Vector3(gx + 0.55f, py - 0.45f, 0f);
-            SpriteRenderer shSR = shGO.AddComponent<SpriteRenderer>();
-            shSR.sprite = blob;
-            shSR.sortingOrder = 2;
-            shSR.color = new Color(0f, 0f, 0f, 0.32f);
-            shGO.transform.localScale = new Vector3(0.95f, 0.75f, 1f);
-
-            // قاعدة العمود
-            GameObject pGO = new GameObject("PostBase");
-            pGO.transform.SetParent(transform, false);
-            pGO.transform.position = new Vector3(gx, py, 0f);
-            SpriteRenderer pSR = pGO.AddComponent<SpriteRenderer>();
-            pSR.sprite = basePlate;
-            pSR.sortingOrder = 4;
-        }
-
-        // ظل اللافتة على الطريق (شرقها باتجاه الشمس)
-        GameObject bShGO = new GameObject("BannerShadow");
-        bShGO.transform.SetParent(transform, false);
-        bShGO.transform.position = new Vector3(gx + 0.85f, 48f, 0f);
-        SpriteRenderer bShSR = bShGO.AddComponent<SpriteRenderer>();
-        bShSR.sprite = BlobSprite();
-        bShSR.sortingOrder = 2;
-        bShSR.color = new Color(0f, 0f, 0f, 0.30f);
-        bShGO.transform.localScale = new Vector3(0.9f, 11.5f, 1f);
-
-        // اللافتة المقلّمة نفسها (فوق السيارة = تعبر تحتها)
-        GameObject bGO = new GameObject("StartBanner");
-        bGO.transform.SetParent(transform, false);
-        bGO.transform.position = new Vector3(gx, 48f, 0f);
-        SpriteRenderer bSR = bGO.AddComponent<SpriteRenderer>();
-        bSR.sprite = BannerSprite();
-        bSR.sortingOrder = 12;
-    }
-
-    // ================= الطبقات والتصادم =================
-
-    Tilemap CreateLayer(GameObject gridGO, string layerName, int sortingOrder, bool withColliders)
-    {
-        GameObject layerGO = new GameObject(layerName);
-        layerGO.transform.SetParent(gridGO.transform, false);
-
-        Tilemap tm = layerGO.AddComponent<Tilemap>();
-
-        TilemapRenderer tr = layerGO.AddComponent<TilemapRenderer>();
-        tr.sortingOrder = sortingOrder;
-        tr.material = new Material(Shader.Find("Sprites/Default"));
-
-        if (withColliders)
-        {
-            // جسم ثابت + مصهر تصادم: كل بلاطات الجدار تصبح شكلاً موحداً ناعماً
-            Rigidbody2D rb = layerGO.AddComponent<Rigidbody2D>();
-            rb.bodyType = RigidbodyType2D.Static;
-
-            TilemapCollider2D tileCol = layerGO.AddComponent<TilemapCollider2D>();
-            CompositeCollider2D comp = layerGO.AddComponent<CompositeCollider2D>();
-            comp.geometryType = CompositeCollider2D.GeometryType.Polygons;
-            tileCol.usedByComposite = true;
-        }
-
-        return tm;
-    }
-
     // ================= نقطة الانطلاق (كما هي) =================
 
     void ComputeStartPose()
     {
         // أمام السيارة خط البداية مباشرة (العمودان 30-31 على المستقيم السفلي)
         float startX = 28f * tileSize + tileSize * 0.5f; // مركز العمود 28
-        float startY = 23f * tileSize + tileSize * 0.5f; // مركز الصف 23
+        float startZ = 23f * tileSize + tileSize * 0.5f; // مركز الصف 23
 
-        StartPosition = new Vector3(startX, startY, 0f);
-        StartRotationZ = -90f; // transform.up يشير نحو +X => انطلاق شرقاً
+        StartPosition = new Vector3(startX, 0f, startZ);
+        StartYaw = 90f; // transform.forward يشير نحو +X => انطلاق شرقاً (في الفضاء المجسّم)
     }
 
     void BuildLapGates()
@@ -449,517 +165,581 @@ public class TrackBuilder : MonoBehaviour
 
     // ================= استعلام السطح =================
 
+    /// <summary>هل الموضع العالمي على العشب (خارج الطريق)؟ يُستخدم لعقاب العشب.</summary>
     public bool IsGrass(Vector3 worldPos)
     {
-        if (roadMap == null) return false;
-        Vector3Int cell = roadMap.WorldToCell(worldPos);
-        return roadMap.GetTile(cell) == null;
+        if (map == null) return false;
+
+        int tx = Mathf.FloorToInt(worldPos.x / tileSize);
+        int tz = Mathf.FloorToInt(worldPos.z / tileSize);
+
+        if (tx < 0 || tz < 0 || tx >= W || tz >= H) return true; // خارج الخريطة = عشب
+        char c = map[tx, tz];
+        return c != RoadChar && c != StartChar;
     }
 
-    // ================= توليد البلاطات إجرائياً (128px, Bilinear) =================
+    // ================= المواد والنسيج الإجرائي =================
 
-    Tile MakeTile(Texture2D tex, string tileName)
+    void EnsureMaterials()
     {
-        tex.name = tileName + "_Tex";
+        matGround = MakeMat(GrassTexture(), 0.06f);
+        matRoad   = MakeMat(AsphaltTexture(), 0.12f);
+        matStart  = MakeMat(CheckerTexture(), 0.08f);
+        matCurb   = MakeMat(CurbTexture(), 0.10f);
+        matWall   = MakeMat(ConcreteTexture(), 0.05f);
+        matPaint  = MakeMat(WhiteTexture(), 0.25f);
+    }
+
+    static Material MakeMat(Texture2D tex, float smooth)
+    {
+        // TR/Paint المخصص (يُولَّد وقت البناء داخل Resources) = دعم مضمون
+        // لألوان الرؤوس + ظلال؛ البديل Standard للمحرر قبل أول بناء.
+        Shader sh = Shader.Find("TR/Paint");
+        if (sh == null) sh = Shader.Find("Standard");
+        if (sh == null) sh = Shader.Find("Legacy Shaders/Diffuse");
+
+        Material m = new Material(sh);
+        m.name = "MAT_" + tex.name;
+        m.mainTexture = tex;
+
+        if (m.HasProperty("_SpecColor"))
+            m.SetColor("_SpecColor", new Color(0.10f, 0.10f, 0.10f, 1f)); // لمعان منخفض للمسار
+        if (m.HasProperty("_Shininess"))
+            m.SetFloat("_Shininess", Mathf.Clamp(smooth, 0.01f, 1f));
+        if (m.HasProperty("_Glossiness"))
+        {
+            m.SetFloat("_Glossiness", smooth);
+            m.SetFloat("_Metallic", 0f);
+        }
+        if (m.HasProperty("_GlossyReflections"))
+            m.SetFloat("_GlossyReflections", 0f); // لا انعكاسات بيئية (موبايل)
+
+        return m;
+    }
+
+    /// <summary>نسيج أبيض مصمت (4×4): يظهر لون الرأس كما هو للعناصر الملوّنة رأسياً.</summary>
+    static Texture2D WhiteTexture()
+    {
+        Texture2D tex = new Texture2D(4, 4, TextureFormat.RGBA32, false);
+        tex.filterMode = FilterMode.Bilinear;
+        Color[] px = new Color[16];
+        for (int i = 0; i < px.Length; i++) px[i] = Color.white;
+        tex.SetPixels(px);
         tex.Apply(false, false);
-
-        Sprite sprite = Sprite.Create(
-            tex,
-            new Rect(0, 0, Tex, Tex),
-            new Vector2(0.5f, 0.5f),
-            (float)Tex / tileSize);
-        sprite.name = tileName + "_Sprite";
-
-        Tile tile = ScriptableObject.CreateInstance<Tile>();
-        tile.sprite = sprite;
-        tile.name = tileName;
-        return tile;
-    }
-
-    Texture2D NewTex()
-    {
-        Texture2D tex = new Texture2D(Tex, Tex, TextureFormat.RGBA32, false);
-        tex.filterMode = FilterMode.Bilinear; // (v0.9.0) نعومة تدعم إحساس العمق
+        tex.name = "White";
         return tex;
     }
 
-    /// <summary>عشب: خطوط جز مائلة مستمرة + حبيبات + شفرات + زهور نادرة.</summary>
-    Texture2D GrassTexture(int variant)
+    /// <summary>عشب: خضرة متدرجة + خطوط جز أفقية باهتة + حبيبات وشفرات أفتح.</summary>
+    static Texture2D GrassTexture()
     {
-        Texture2D tex = NewTex();
-        Color baseA = variant == 0
-            ? new Color(0.235f, 0.470f, 0.160f)
-            : new Color(0.220f, 0.445f, 0.150f);
-        Color blade = new Color(0.155f, 0.350f, 0.105f);
-        Color flowerW = new Color(0.92f, 0.92f, 0.85f);
-        Color flowerY = new Color(0.92f, 0.80f, 0.25f);
+        const int N = 256;
+        Texture2D tex = NewTex(N);
+        var rng = new System.Random(77);
+        Color[] px = new Color[N * N];
 
-        var rng = new System.Random(77 + variant);
-        Color[] px = new Color[Tex * Tex];
-
-        for (int y = 0; y < Tex; y++)
+        for (int y = 0; y < N; y++)
         {
-            for (int x = 0; x < Tex; x++)
+            // خطوط جز كل 42 بكسل (≈ 0.5م عالمياً عند تكرار 3م)
+            bool mow = ((y / 42) & 1) == 0;
+            for (int x = 0; x < N; x++)
             {
-                Color c = baseA;
+                float n = (float)rng.NextDouble() * 0.10f - 0.05f;
+                float mowMul = mow ? 1.06f : 0.94f;
+                float blade = rng.NextDouble() < 0.015 ? 0.18f : 0f;
+                float r = (0.235f + n + blade) * mowMul;
+                float g = (0.470f + n + blade * 1.4f) * mowMul;
+                float b = (0.160f + n * 0.6f + blade * 0.5f) * mowMul;
+                px[y * N + x] = new Color(Mathf.Clamp01(r), Mathf.Clamp01(g), Mathf.Clamp01(b), 1f);
+            }
+        }
 
-                // خطوط جز مائلة (الفترة 32px تقسم 128 => تستمر عبر البلاطات)
-                float s = Mathf.Sin((x + y) * Mathf.PI / 32f) * 0.035f;
-                c.r += s * 0.5f; c.g += s; c.b += s * 0.5f;
+        tex.SetPixels(px);
+        tex.Apply(false, false);
+        tex.name = "Grass";
+        return tex;
+    }
 
+    /// <summary>إسفلت: رمادي داكن بحبيبات متفاوتة وبقع قيمة خفيفة.</summary>
+    static Texture2D AsphaltTexture()
+    {
+        const int N = 128;
+        Texture2D tex = NewTex(N);
+        var rng = new System.Random(41);
+        Color[] px = new Color[N * N];
+
+        for (int i = 0; i < N * N; i++)
+        {
+            float n = (float)rng.NextDouble();
+            float v = 0.30f + n * 0.09f;               // أساس داكن
+            if (rng.NextDouble() < 0.02) v += 0.08f;    // حصاة أفتح
+            if (rng.NextDouble() < 0.015) v -= 0.06f;   // بقعة أغمق
+            px[i] = new Color(v, v, v * 1.02f, 1f);
+        }
+
+        tex.SetPixels(px);
+        tex.Apply(false, false);
+        tex.name = "Asphalt";
+        return tex;
+    }
+
+    /// <summary>مربعات كُرْد أبيض/أسود 8×8 لخط البداية واللافتة.</summary>
+    static Texture2D CheckerTexture()
+    {
+        const int N = 64;
+        const int Cell = 8;
+        Texture2D tex = NewTex(N);
+        Color[] px = new Color[N * N];
+
+        for (int y = 0; y < N; y++)
+            for (int x = 0; x < N; x++)
+            {
+                bool c = ((x / Cell) + (y / Cell)) % 2 == 0;
+                px[y * N + x] = c ? Color.white : new Color(0.08f, 0.08f, 0.08f, 1f);
+            }
+
+        tex.SetPixels(px);
+        tex.Apply(false, false);
+        tex.name = "Checker";
+        return tex;
+    }
+
+    /// <summary>كيرب: شريطان (أحمر ثم أبيض) على المحور U — كل شريط 0.5 متر.</summary>
+    static Texture2D CurbTexture()
+    {
+        const int Nw = 64, Nh = 32;
+        Texture2D tex = NewTex(Nw, Nh);
+        Color[] px = new Color[Nw * Nh];
+        var rng = new System.Random(9);
+
+        Color red = new Color(0.78f, 0.10f, 0.10f);
+        Color white = new Color(0.92f, 0.92f, 0.90f);
+
+        for (int y = 0; y < Nh; y++)
+            for (int x = 0; x < Nw; x++)
+            {
+                Color c = x < Nw / 2 ? red : white;
                 float n = (float)rng.NextDouble() * 0.05f - 0.025f;
-                c.r += n; c.g += n; c.b += n;
+                px[y * Nw + x] = new Color(c.r + n, c.g + n, c.b + n, 1f);
+            }
 
-                int roll = rng.Next(1000);
-                if (roll < 40) c = blade;                      // شفرات داكنة
-                else if (roll < 43) c = flowerW;               // زهرة بيضاء نادرة
-                else if (roll < 45) c = flowerY;               // زهرة صفراء نادرة
+        tex.SetPixels(px);
+        tex.Apply(false, false);
+        tex.name = "Curb";
+        return tex;
+    }
 
-                px[y * Tex + x] = c;
+    /// <summary>خرسانة الحواجز: رمادي فاتح مع حبيبات وعروق باهتة.</summary>
+    static Texture2D ConcreteTexture()
+    {
+        const int N = 128;
+        Texture2D tex = NewTex(N);
+        var rng = new System.Random(515);
+        Color[] px = new Color[N * N];
+
+        for (int y = 0; y < N; y++)
+        {
+            float seam = (y % 64) < 2 ? -0.10f : 0f; // مفاصل أفقية كل مترين
+            for (int x = 0; x < N; x++)
+            {
+                float n = (float)rng.NextDouble() * 0.08f - 0.04f;
+                float v = 0.70f + n + seam;
+                px[y * N + x] = new Color(v, v * 0.99f, v * 0.96f, 1f);
             }
         }
 
         tex.SetPixels(px);
+        tex.Apply(false, false);
+        tex.name = "Concrete";
         return tex;
     }
 
-    /// <summary>إسفلت: بقع قيمة كبيرة + حبيبات + حصى + شقوق.</summary>
-    Texture2D RoadTexture(int variant)
+    static Texture2D NewTex(int size) => NewTex(size, size);
+
+    static Texture2D NewTex(int w, int h)
     {
-        Texture2D tex = NewTex();
-        Color asphalt = new Color(0.255f, 0.255f, 0.285f);
-        Color pebbleLight = new Color(0.335f, 0.335f, 0.365f);
-        Color pebbleDark  = new Color(0.180f, 0.180f, 0.205f);
-        Color crack = new Color(0.150f, 0.150f, 0.170f);
+        Texture2D tex = new Texture2D(w, h, TextureFormat.RGBA32, false);
+        tex.filterMode = FilterMode.Bilinear;
+        tex.wrapMode = TextureWrapMode.Repeat;
+        return tex;
+    }
 
-        var rng = new System.Random(123 + variant * 7);
-        Color[] px = new Color[Tex * Tex];
+    // ================= بناء مجسّم: أرض/طريق/كيرب/جدران =================
 
-        // بقع قيمة كبيرة (4 دوائر ناعمة) لكسر الرتابة
-        var blobs = new List<Vector3>();
-        for (int i = 0; i < 4; i++)
-            blobs.Add(new Vector3(rng.Next(Tex), rng.Next(Tex), 30f + rng.Next(30)));
+    GameObject EmitMesh(MeshAccumulator acc, Material mat, string name,
+                        bool castShadows, bool makeStatic)
+    {
+        if (acc.VertexCount == 0) return null;
 
-        for (int y = 0; y < Tex; y++)
+        Mesh mesh = acc.Build(name + "_Mesh");
+        GameObject go = new GameObject(name);
+        go.transform.SetParent(transform, false);
+
+        MeshFilter mf = go.AddComponent<MeshFilter>();
+        mf.sharedMesh = mesh;
+
+        MeshRenderer mr = go.AddComponent<MeshRenderer>();
+        mr.sharedMaterial = mat;
+        mr.shadowCastingMode = castShadows
+            ? UnityEngine.Rendering.ShadowCastingMode.On
+            : UnityEngine.Rendering.ShadowCastingMode.Off;
+        mr.receiveShadows = true;
+
+        if (makeStatic) go.isStatic = true;
+        return go;
+    }
+
+    void BuildGround()
+    {
+        // أرضية عشب واسعة تمتد خارج الحوائط (أفق المشهد المجسّم)
+        var acc = new MeshAccumulator();
+        float mx = -40f, Mx = W * tileSize + 40f;
+        float mz = -40f, Mz = H * tileSize + 40f;
+        acc.AddTop(mx, Mx, mz, Mz, 0f, 1f / 3f, Color.white); // تكرار النسيج كل 3 أمتار
+        EmitMesh(acc, matGround, "Ground", castShadows: false, makeStatic: true);
+    }
+
+    void BuildRoadAndStart()
+    {
+        var road = new MeshAccumulator();
+        var start = new MeshAccumulator();
+
+        for (int x = 0; x < W; x++)
         {
-            for (int x = 0; x < Tex; x++)
+            for (int z = 0; z < H; z++)
             {
-                Color c = asphalt;
+                char c = map[x, z];
+                if (c != RoadChar && c != StartChar) continue;
 
-                foreach (var b in blobs)
+                float x0 = x * tileSize, x1 = (x + 1) * tileSize;
+                float z0 = z * tileSize, z1 = (z + 1) * tileSize;
+
+                if (c == StartChar)
                 {
-                    float dx = Mathf.Abs(x - b.x); dx = Mathf.Min(dx, Tex - dx);
-                    float dy = Mathf.Abs(y - b.y); dy = Mathf.Min(dy, Tex - dy);
-                    float d = Mathf.Sqrt(dx * dx + dy * dy);
-                    if (d < b.z)
-                    {
-                        float k = (1f - d / b.z) * 0.05f;
-                        c.r += k; c.g += k; c.b += k;
-                    }
+                    // uv متصل عبر البلاطات حتى يستمر نمط الكُرْد عبر الشريط كله
+                    float u = (x - 30f), v = (z - 22f);
+                    start.AddQuad(
+                        new Vector3(x0, 0.02f, z0), new Vector3(x0, 0.02f, z1),
+                        new Vector3(x1, 0.02f, z1), new Vector3(x1, 0.02f, z0),
+                        new Vector2(u, v), new Vector2(u, v + 1f),
+                        new Vector2(u + 1f, v + 1f), new Vector2(u + 1f, v), Color.white);
                 }
-
-                float n = (float)rng.NextDouble() * 0.04f - 0.02f;
-                c.r += n; c.g += n; c.b += n;
-
-                int roll = rng.Next(100);
-                if (roll < 5) c = pebbleLight;
-                else if (roll < 9) c = pebbleDark;
-
-                px[y * Tex + x] = c;
-            }
-        }
-
-        // شقوق قصيرة
-        for (int i = 0; i < 2; i++)
-        {
-            int cxp = rng.Next(Tex), cyp = rng.Next(Tex);
-            int len = 10 + rng.Next(14);
-            float dir = (float)rng.NextDouble() * Mathf.PI * 2f;
-            for (int s = 0; s < len; s++)
-            {
-                int xx = Mathf.Clamp(Mathf.RoundToInt(cxp + Mathf.Cos(dir) * s), 0, Tex - 1);
-                int yy = Mathf.Clamp(Mathf.RoundToInt(cyp + Mathf.Sin(dir) * s), 0, Tex - 1);
-                px[yy * Tex + xx] = crack;
-            }
-        }
-
-        tex.SetPixels(px);
-        return tex;
-    }
-
-    /// <summary>كيرب: أحمر/أبيض بتدرج لكل شريحة + خط خارجي داكن + AO نحو الإسفلت.</summary>
-    Texture2D CurbTexture(int variant)
-    {
-        Texture2D tex = RoadTexture(variant);
-        Color red   = new Color(0.78f, 0.16f, 0.14f);
-        Color white = new Color(0.93f, 0.93f, 0.90f);
-
-        Color[] px = tex.GetPixels();
-        const int Border = 14;
-
-        for (int y = 0; y < Tex; y++)
-        {
-            for (int x = 0; x < Tex; x++)
-            {
-                bool edge = x < Border || x > Tex - 1 - Border || y < Border || y > Tex - 1 - Border;
-                if (!edge) continue;
-
-                // شريحة بتدرج إضاءة (مصدر ضوء ثابت أعلى-يسار)
-                float stripePos = Mathf.Repeat(x + y, 28f);
-                float shade = Mathf.Lerp(1.12f, 0.88f, stripePos / 28f);
-                Color c = ((x + y) / 14) % 2 == 0 ? red : white;
-                c.r = Mathf.Clamp01(c.r * shade);
-                c.g = Mathf.Clamp01(c.g * shade);
-                c.b = Mathf.Clamp01(c.b * shade);
-
-                // خط خارجي داكن (AO مع ما حول الطريق)
-                bool outer = x < 3 || x > Tex - 4 || y < 3 || y > Tex - 4;
-                if (outer) c *= 0.45f;
-
-                px[y * Tex + x] = c;
-            }
-        }
-
-        // ظل ناعم داخل الإسفلت عند حدود الكيرب (اتصال واقعي)
-        for (int y = Border; y < Tex - Border; y++)
-        {
-            for (int x = Border; x < Tex - Border; x++)
-            {
-                float dEdge = Mathf.Min(Mathf.Min(x - Border, Tex - 1 - Border - x),
-                              Mathf.Min(y - Border, Tex - 1 - Border - y));
-                if (dEdge < 6f)
+                else
                 {
-                    Color c = px[y * Tex + x];
-                    float k = 0.22f * (1f - dEdge / 6f);
-                    px[y * Tex + x] = new Color(c.r * (1f - k), c.g * (1f - k), c.b * (1f - k), 1f);
+                    // تنويع سطوع خفيف بين البلاطات (يكسر الرتابة دون نسيج إضافي)
+                    float tint = ((x * 7 + z * 13) & 1) == 0 ? 1f : 0.955f;
+                    road.AddTop(x0, x1, z0, z1, 0.02f, 0.5f,
+                        new Color(tint, tint, tint, 1f)); // تكرار كل بلاطة
                 }
             }
         }
 
-        tex.SetPixels(px);
-        return tex;
+        EmitMesh(road, matRoad, "Road", castShadows: false, makeStatic: true);
+        EmitMesh(start, matStart, "StartLine", castShadows: false, makeStatic: true);
     }
 
-    /// <summary>خط البداية: رقعة شطرنج بتدرج خفيف + شبكة داكنة رقيقة.</summary>
-    Texture2D CheckerTexture()
+    /// <summary>كيرب مرفوع (0.07م) على كل حافة طريق مجاورة لغير الطريق.</summary>
+    void BuildCurbs()
     {
-        Texture2D tex = NewTex();
-        Color black = new Color(0.09f, 0.09f, 0.09f);
-        Color white = new Color(0.94f, 0.94f, 0.94f);
+        var acc = new MeshAccumulator();
+        const float h = 0.07f;  // الارتفاع
+        const float wdt = 0.55f; // العرض داخل الطريق
+        Color topCol = Color.white;
 
-        var rng = new System.Random(321);
-        Color[] px = new Color[Tex * Tex];
-
-        for (int y = 0; y < Tex; y++)
+        for (int x = 0; x < W; x++)
         {
-            for (int x = 0; x < Tex; x++)
+            for (int z = 0; z < H; z++)
             {
-                Color c = ((x / 16 + y / 16) % 2 == 0) ? white : black;
-                float n = (float)rng.NextDouble() * 0.05f - 0.025f;
-                c.r += n; c.g += n; c.b += n;
-                if (x % 16 == 0 || y % 16 == 0) c *= 0.55f; // فواصل رقيقة
-                px[y * Tex + x] = c;
+                if (!IsRoadLike(x, z)) continue;
+
+                float x0 = x * tileSize, x1 = (x + 1) * tileSize;
+                float z0 = z * tileSize, z1 = (z + 1) * tileSize;
+
+                // الحافة الشمالية (+Z): شريط بمحاذاة X
+                if (!IsRoadLike(x, z + 1))
+                {
+                    float a = z1 - wdt, b = z1;
+                    acc.AddQuad(new Vector3(x0, h, a), new Vector3(x0, h, b),
+                                new Vector3(x1, h, b), new Vector3(x1, h, a),
+                                new Vector2(x0, a), new Vector2(x0, b),
+                                new Vector2(x1, b), new Vector2(x1, a), topCol);
+                    AddCurbOuterFace(acc, x0, x1, z1, z1, h, true);
+                }
+                // الحافة الجنوبية (-Z)
+                if (!IsRoadLike(x, z - 1))
+                {
+                    float a = z0, b = z0 + wdt;
+                    acc.AddQuad(new Vector3(x0, h, a), new Vector3(x0, h, b),
+                                new Vector3(x1, h, b), new Vector3(x1, h, a),
+                                new Vector2(x0, a), new Vector2(x0, b),
+                                new Vector2(x1, b), new Vector2(x1, a), topCol);
+                    AddCurbOuterFace(acc, x0, x1, z0, z0, h, false);
+                }
+                // الحافة الشرقية (+X): شريط بمحاذاة Z
+                if (!IsRoadLike(x + 1, z))
+                {
+                    float a = x1 - wdt, b = x1;
+                    acc.AddQuad(new Vector3(a, h, z0), new Vector3(a, h, z1),
+                                new Vector3(b, h, z1), new Vector3(b, h, z0),
+                                new Vector2(z0, a), new Vector2(z1, a),
+                                new Vector2(z1, b), new Vector2(z0, b), topCol);
+                    AddCurbOuterFace(acc, x1, x1, z0, z1, h, true);
+                }
+                // الحافة الغربية (-X)
+                if (!IsRoadLike(x - 1, z))
+                {
+                    float a = x0, b = x0 + wdt;
+                    acc.AddQuad(new Vector3(a, h, z0), new Vector3(a, h, z1),
+                                new Vector3(b, h, z1), new Vector3(b, h, z0),
+                                new Vector2(z0, a), new Vector2(z1, a),
+                                new Vector2(z1, b), new Vector2(z0, b), topCol);
+                    AddCurbOuterFace(acc, x0, x0, z0, z1, h, false);
+                }
             }
         }
 
-        tex.SetPixels(px);
-        return tex;
+        EmitMesh(acc, matCurb, "Curbs", castShadows: false, makeStatic: true);
+    }
+
+    bool IsRoadLike(int x, int z)
+    {
+        if (x < 0 || z < 0 || x >= W || z >= H) return false;
+        char c = map[x, z];
+        return c == RoadChar || c == StartChar;
+    }
+
+    /// <summary>وجه رأسي خارجي للكيرب (شفة صغيرة تحاكي ارتفاع الحافة).
+    /// الاستدعاءان: حافة على X ⟹ a=مدى X و c=ثابت Z | حافة على Z ⟹ a=ثابت X و c=مدى Z.</summary>
+    static void AddCurbOuterFace(MeshAccumulator acc,
+        float a0, float a1, float c0, float c1, float h, bool positiveDir)
+    {
+        if (Mathf.Approximately(c0, c1))
+        {
+            // وجه بمحاذاة X عند z ثابت
+            float x0 = a0, x1 = a1, zc = c0;
+            if (positiveDir)
+                acc.AddQuad(new Vector3(x0, 0f, zc), new Vector3(x1, 0f, zc),
+                            new Vector3(x1, h, zc), new Vector3(x0, h, zc),
+                            new Vector2(x0, 0f), new Vector2(x1, 0f),
+                            new Vector2(x1, h), new Vector2(x0, h), Color.white);
+            else
+                acc.AddQuad(new Vector3(x1, 0f, zc), new Vector3(x0, 0f, zc),
+                            new Vector3(x0, h, zc), new Vector3(x1, h, zc),
+                            new Vector2(x1, 0f), new Vector2(x0, 0f),
+                            new Vector2(x0, h), new Vector2(x1, h), Color.white);
+        }
+        else
+        {
+            // وجه بمحاذاة Z عند x ثابت
+            float xc = a0, z0 = c0, z1 = c1;
+            if (positiveDir)
+                acc.AddQuad(new Vector3(xc, 0f, z0), new Vector3(xc, h, z0),
+                            new Vector3(xc, h, z1), new Vector3(xc, 0f, z1),
+                            new Vector2(z0, 0f), new Vector2(z0, h),
+                            new Vector2(z1, h), new Vector2(z1, 0f), Color.white);
+            else
+                acc.AddQuad(new Vector3(xc, 0f, z0), new Vector3(xc, 0f, z1),
+                            new Vector3(xc, h, z1), new Vector3(xc, h, z0),
+                            new Vector2(z0, 0f), new Vector2(z1, 0f),
+                            new Vector2(z1, h), new Vector2(z0, h), Color.white);
+        }
+    }
+
+    void BuildWalls()
+    {
+        var acc = new MeshAccumulator();
+        Color side = new Color(0.86f, 0.86f, 0.84f);
+        Color top = new Color(0.97f, 0.97f, 0.95f);
+
+        for (int x = 0; x < W; x++)
+        {
+            for (int z = 0; z < H; z++)
+            {
+                if (map[x, z] != WallChar) continue;
+
+                float cx = (x + 0.5f) * tileSize;
+                float cz = (z + 0.5f) * tileSize;
+                acc.AddBox(new Vector3(cx, 0.55f, cz), new Vector3(tileSize, 1.1f, tileSize),
+                           0.5f, top, side); // تكرار الخرسانة كل 2م
+            }
+        }
+
+        EmitMesh(acc, matWall, "Walls", castShadows: true, makeStatic: true);
     }
 
     /// <summary>
-    /// الجدار v0.9.0: وجه علوي لإسمنت على شكل صندوق حاجز:
-    /// حواف مشطوفة (أعلى/يسار مضيئة، أسفل/يمين داكنة) + خطوط تحذير مائلة
-    /// + خشونة + خط داكن حول كل كتلة (فواصل الصناديق المكدسة).
+    /// مصادمات الجدران: دمج الصفوف الأفقية المتتالية في صناديق أقل عدداً —
+    /// نفس تغطية بلاطات '#' القديمة حرفياً (اللعب والتصادم كما كانا).
     /// </summary>
-    Texture2D WallTexture(int variant)
+    void BuildWallColliders()
     {
-        Texture2D tex = NewTex();
-        Color yellow = new Color(0.85f, 0.66f, 0.12f);
-        Color darkStripe = new Color(0.15f, 0.15f, 0.17f);
-        Color concrete = new Color(0.52f, 0.53f, 0.57f);
+        GameObject wallsGO = GameObject.Find("Walls");
+        if (wallsGO == null) wallsGO = gameObject;
 
-        var rng = new System.Random(555 + variant * 11);
-        Color[] px = new Color[Tex * Tex];
-        int phase = variant * 8; // إزاحة نصف فترة => كل كتلة مختلفة عن جارتها
-
-        for (int y = 0; y < Tex; y++)
+        for (int z = 0; z < H; z++)
         {
-            for (int x = 0; x < Tex; x++)
+            int x = 0;
+            while (x < W)
             {
-                int sx = x + phase;
-                Color c = (((sx + y) / 16) % 2 == 0) ? yellow : darkStripe;
+                if (map[x, z] != WallChar) { x++; continue; }
 
-                // خشونة
-                float n = (float)rng.NextDouble() * 0.06f - 0.03f;
-                c.r += n; c.g += n; c.b += n;
+                int x0 = x;
+                while (x < W && map[x, z] == WallChar) x++;
+                int x1 = x - 1;
 
-                // شرائط الإسمنت بين الخطوط (تخفيف التباين)
-                if (((sx + y) / 16) % 2 == 0)
-                    c = Color.Lerp(c, concrete, 0.18f);
-
-                px[y * Tex + x] = c;
+                BoxCollider col = wallsGO.AddComponent<BoxCollider>();
+                col.center = new Vector3((x0 + (x1 - x0 + 1) * 0.5f) * tileSize, 0.55f, (z + 0.5f) * tileSize);
+                col.size = new Vector3((x1 - x0 + 1) * tileSize, 1.1f, tileSize);
             }
         }
-
-        // Bevel: أعلى ويسار مضيء، أسفل ويمين داكن — يوهم بالسماكة
-        for (int y = 0; y < Tex; y++)
-        {
-            for (int x = 0; x < Tex; x++)
-            {
-                Color c = px[y * Tex + x];
-                float k = 1f;
-
-                if (y >= Tex - 5) k = Mathf.Lerp(1.28f, 1f, (Tex - 1 - y) / 5f);      // الحافة العلوية
-                else if (y < 5)   k = Mathf.Lerp(0.55f, 1f, y / 5f);                  // السفلية
-                if (x < 5)        k *= Mathf.Lerp(1.22f, 1f, x / 5f);                 // اليسرى
-                else if (x >= Tex - 5) k *= Mathf.Lerp(0.60f, 1f, (Tex - 1 - x) / 5f);// اليمنى
-
-                if (k != 1f)
-                {
-                    c.r = Mathf.Clamp01(c.r * k);
-                    c.g = Mathf.Clamp01(c.g * k);
-                    c.b = Mathf.Clamp01(c.b * k);
-                }
-
-                // خط داكن حول الكتلة (فاصل الصناديق)
-                if (x == 0 || y == 0 || x == Tex - 1 || y == Tex - 1) c *= 0.38f;
-
-                px[y * Tex + x] = c;
-            }
-        }
-
-        tex.SetPixels(px);
-        return tex;
     }
 
-    /// <summary>بلاطة ظل متدرجة: من الحافة المواجهة للجدار تنسدل وتتلاشى.</summary>
-    Texture2D ShadowTileTexture(bool fromEast, bool fromSouth)
+    // ================= ديكور مجسّم (مادة ملوّنة رأسياً واحدة) =================
+
+    void BuildScenery()
     {
-        Texture2D tex = NewTex();
-        Color[] px = new Color[Tex * Tex];
+        var acc = new MeshAccumulator();
+        var rng = new System.Random(20260101);
 
-        for (int y = 0; y < Tex; y++)
+        Color trunk = new Color(0.42f, 0.29f, 0.17f);
+        Color leafA = new Color(0.24f, 0.50f, 0.18f);
+        Color leafB = new Color(0.18f, 0.43f, 0.15f);
+        Color concrete = new Color(0.80f, 0.80f, 0.78f);
+        Color roofRed = new Color(0.80f, 0.22f, 0.18f);
+        Color postCol = new Color(0.35f, 0.36f, 0.38f);
+
+        // --- أشجار الجزيرة الداخلية ---
+        for (int i = 0; i < 11; i++)
         {
-            for (int x = 0; x < Tex; x++)
-            {
-                float a = 0f;
-
-                if (fromSouth) // الجدار شمال البلاطة: الظل يلتصق بأعلى بلاطتها
-                {
-                    float dTop = (Tex - 1 - y);
-                    if (dTop < 58f) a = Mathf.Max(a, 0.34f * Mathf.Pow(1f - dTop / 58f, 1.25f));
-                }
-                if (fromEast)  // الجدار غرب البلاطة: الظل يلتصق بيسارها
-                {
-                    if (x < 46f) a = Mathf.Max(a, 0.28f * Mathf.Pow(1f - x / 46f, 1.25f));
-                }
-
-                px[y * Tex + x] = new Color(0f, 0f, 0f, a);
-            }
+            float tx = rng.Next(22, 70) + (float)rng.NextDouble();
+            float tz = rng.Next(20, 36) + (float)rng.NextDouble();
+            AddTree(acc, new Vector3(tx, 0f, tz), 0.85f + (float)rng.NextDouble() * 0.5f,
+                    rng.NextDouble() < 0.5 ? leafA : leafB, trunk);
         }
 
-        tex.SetPixels(px);
-        return tex;
+        // --- أشجار خارج الجدار (أفق المشهد) ---
+        for (int i = 0; i < 7; i++)
+        {
+            float x = 6f + rng.Next(0, 84);
+            if (x > 28f && x < 54f) x += 40f; // إبعاد عن المدرّج الشمالي
+            AddTree(acc, new Vector3(x, 0f, -4f - rng.Next(0, 7)),
+                    1.0f + (float)rng.NextDouble() * 0.5f,
+                    rng.NextDouble() < 0.5 ? leafA : leafB, trunk);
+        }
+
+        for (int i = 0; i < 6; i++)
+        {
+            float x = 6f + rng.Next(0, 84);
+            if (x > 18f && x < 48f) x += 40f; // إبعاد عن المدرّج الجنوبي
+            AddTree(acc, new Vector3(x, 0f, 60f + rng.Next(0, 7)),
+                    1.0f + (float)rng.NextDouble() * 0.5f,
+                    rng.NextDouble() < 0.5 ? leafA : leafB, trunk);
+        }
+
+        for (int i = 0; i < 4; i++)
+        {
+            AddTree(acc, new Vector3(-4f - rng.Next(0, 6), 0f, 6f + rng.Next(0, 44)),
+                    1.0f + (float)rng.NextDouble() * 0.4f, leafB, trunk);
+            AddTree(acc, new Vector3(W * tileSize + 4f + rng.Next(0, 6), 0f, 6f + rng.Next(0, 44)),
+                    1.0f + (float)rng.NextDouble() * 0.4f, leafA, trunk);
+        }
+
+        // --- مدرّج جمهور جنوبي (يطل على المستقيم السفلي — يواجه -Z) ---
+        AddGrandstand(acc, new Vector3(33f, 0f, 60.5f), 20f, concrete, roofRed, postCol, rng, facePositiveZ: false);
+        // --- مدرّج شمالي (يطل على المستقيم العلوي — يواجه +Z) ---
+        AddGrandstand(acc, new Vector3(41f, 0f, -5.5f), 18f, concrete, roofRed, postCol, rng, facePositiveZ: true);
+
+        // --- لوحات إعلانات على جدار الجزيرة (تواجه المستقيمين) ---
+        Color[] boardCols =
+        {
+            new Color(0.90f, 0.30f, 0.25f),
+            new Color(0.25f, 0.55f, 0.90f),
+            new Color(0.95f, 0.78f, 0.20f),
+            new Color(0.20f, 0.70f, 0.45f),
+            new Color(0.90f, 0.45f, 0.15f)
+        };
+        for (int i = 0; i < 4; i++)
+            AddBillboard(acc, new Vector3(24f + i * 15f, 0f, 41.1f), 0f, boardCols[i % boardCols.Length], postCol);
+        for (int i = 0; i < 3; i++)
+            AddBillboard(acc, new Vector3(27f + i * 15f, 0f, 15.2f), 0f, boardCols[(i + 2) % boardCols.Length], postCol);
+
+        // --- بوابة الانطلاق: عمودان + لافتة مقلّمة تعلو السيارة ---
+        float gx = 62f;
+        acc.AddBox(new Vector3(gx, 2.6f, 42.6f), new Vector3(0.55f, 5.2f, 0.55f), 0.5f, Color.white, concrete);
+        acc.AddBox(new Vector3(gx, 2.6f, 53.4f), new Vector3(0.55f, 5.2f, 0.55f), 0.5f, Color.white, concrete);
+        for (int i = 0; i < 6; i++)
+        {
+            float z0 = 42.6f + i * (10.8f / 6f);
+            Color c = (i & 1) == 0 ? roofRed : Color.white;
+            acc.AddBox(new Vector3(gx, 4.65f, z0 + (10.8f / 12f)),
+                       new Vector3(0.4f, 1.0f, 10.8f / 6f), 0.5f, c, c * 0.85f);
+        }
+
+        EmitMesh(acc, matPaint, "Scenery", castShadows: true, makeStatic: true);
     }
 
-    // ================= سبرايتات الديكور =================
-
-    /// <summary>تاج شجرة: دوائر ناعمة متراكبة (قاعدة داكنة + وسط + لمعة شمال-غرب).</summary>
-    Sprite TreeSprite()
+    /// <summary>شجرة: جذع أسطواني + تُيج كروي مضغوط.</summary>
+    static void AddTree(MeshAccumulator acc, Vector3 pos, float s, Color leaf, Color trunk)
     {
-        const int S = 160;
-        Texture2D tex = new Texture2D(S, S, TextureFormat.RGBA32, false);
-        tex.filterMode = FilterMode.Bilinear;
+        float trunkH = 1.15f * s;
+        acc.AddCylinder(new Vector3(pos.x, trunkH * 0.5f, pos.z), 0.14f * s, trunkH, 7, 0.5f, trunk);
 
-        Color[] px = new Color[S * S];
-        var rng = new System.Random(606);
-
-        SoftCircle(px, S, 84f, 76f, 56f, new Color(0.10f, 0.27f, 0.10f, 1f));
-        SoftCircle(px, S, 72f, 90f, 45f, new Color(0.16f, 0.40f, 0.14f, 1f));
-        SoftCircle(px, S, 63f, 99f, 27f, new Color(0.25f, 0.51f, 0.18f, 0.85f));
-        SoftCircle(px, S, 97f, 63f, 20f, new Color(0.07f, 0.20f, 0.08f, 0.9f)); // قعر داكن جنوب-شرق
-        SoftCircle(px, S, 96f, 62f, 7f,  new Color(0.33f, 0.22f, 0.13f, 0.95f));// ثمرة جذع بارزة
-
-        // حبيبات أوراق
-        for (int i = 0; i < 260; i++)
-        {
-            int x = rng.Next(S), y = rng.Next(S);
-            if (px[y * S + x].a > 0.5f)
-            {
-                Color c = px[y * S + x];
-                float n = (float)rng.NextDouble() * 0.10f - 0.05f;
-                px[y * S + x] = new Color(Mathf.Clamp01(c.r + n), Mathf.Clamp01(c.g + n), Mathf.Clamp01(c.b + n), c.a);
-            }
-        }
-
-        tex.SetPixels(px);
-        tex.Apply(false, false);
-
-        Sprite sp = Sprite.Create(tex, new Rect(0, 0, S, S), new Vector2(0.5f, 0.5f), 64f);
-        sp.name = "TreeSprite";
-        return sp;
+        float cy = trunkH + 0.72f * s;
+        acc.AddSphere(new Vector3(pos.x, cy, pos.z), 0.92f * s, 8, 5, leaf, 0.85f);
+        // طبقة تُيج ثانية أصغر أعلى الشجرة (عمق أكبر)
+        acc.AddSphere(new Vector3(pos.x + 0.1f * s, cy + 0.55f * s, pos.z - 0.08f * s),
+                      0.55f * s, 7, 4, leaf * 0.92f, 0.9f);
     }
 
-    /// <summary>قرص ظل ناعم (أشجار/أعمدة/لافتة).</summary>
-    Sprite BlobSprite()
+    /// <summary>مدرّج: قاعدة درجات + جمهور ملوّن + سقف على أعمدة. الدرجات تصعد بعيداً عن الحلبة.</summary>
+    static void AddGrandstand(MeshAccumulator acc, Vector3 origin, float width,
+                              Color concrete, Color roof, Color post, System.Random rng, bool facePositiveZ)
     {
-        const int S = 96;
-        Texture2D tex = new Texture2D(S, S, TextureFormat.RGBA32, false);
-        tex.filterMode = FilterMode.Bilinear;
+        // origin = مركز القاعدة على الأرض. اتجاه الصعود d = بعيداً عن جهة المواجهة.
+        float d = facePositiveZ ? -1f : 1f;
+        acc.AddBox(new Vector3(origin.x, 0.35f, origin.z), new Vector3(width, 0.7f, 5.6f), 0.5f, concrete, concrete * 0.85f);
 
-        Color[] px = new Color[S * S];
-        for (int y = 0; y < S; y++)
+        // درجات متصاعدة بعيداً عن الحلبة (نحو +Z) بجبانة ملوّنة
+        Color[] crowd =
         {
-            for (int x = 0; x < S; x++)
+            new Color(0.85f, 0.30f, 0.28f), new Color(0.30f, 0.48f, 0.85f),
+            new Color(0.93f, 0.80f, 0.30f), new Color(0.35f, 0.70f, 0.45f),
+            Color.white, new Color(0.60f, 0.40f, 0.75f)
+        };
+
+        for (int step = 0; step < 4; step++)
+        {
+            float y = 0.7f + step * 0.5f;
+            float z = origin.z + d * (1.4f + step * 1.05f);
+            acc.AddBox(new Vector3(origin.x, y, z), new Vector3(width, 0.5f, 1.15f), 0.5f, concrete, concrete * 0.85f);
+
+            // جمهور: مكعبات صغيرة ملوّنة فوق كل درجة
+            for (int i = 0; i < width / 1.2f; i++)
             {
-                float nx = (x + 0.5f) / S * 2f - 1f;
-                float ny = (y + 0.5f) / S * 2f - 1f;
-                float d = Mathf.Sqrt(nx * nx + ny * ny);
-                float a = Mathf.Pow(1f - Mathf.SmoothStep(0.05f, 1f, d), 1.3f);
-                px[y * S + x] = new Color(1f, 1f, 1f, Mathf.Clamp01(a));
+                float px = origin.x - width * 0.5f + 0.8f + i * 1.2f + (float)rng.NextDouble() * 0.4f;
+                Color c = crowd[rng.Next(crowd.Length)];
+                acc.AddBox(new Vector3(px, y + 0.42f, z - d * 0.15f + (float)rng.NextDouble() * 0.3f),
+                           new Vector3(0.34f, 0.42f, 0.3f), 0.5f, c, c * 0.8f);
             }
         }
 
-        tex.SetPixels(px);
-        tex.Apply(false, false);
-
-        Sprite sp = Sprite.Create(tex, new Rect(0, 0, S, S), new Vector2(0.5f, 0.5f), 64f);
-        sp.name = "BlobShadowSprite";
-        return sp;
+        // أعمدة السقف
+        float topY = 0.7f + 4 * 0.5f;
+        acc.AddBox(new Vector3(origin.x - width * 0.42f, topY + 1.1f, origin.z + d * 2.4f), new Vector3(0.22f, 2.2f, 0.22f), 0.5f, post, post);
+        acc.AddBox(new Vector3(origin.x + width * 0.42f, topY + 1.1f, origin.z + d * 2.4f), new Vector3(0.22f, 2.2f, 0.22f), 0.5f, post, post);
+        // السقف
+        acc.AddBox(new Vector3(origin.x, topY + 2.3f, origin.z + d * 0.4f), new Vector3(width + 0.8f, 0.18f, 5.2f), 0.5f, roof, roof * 0.8f);
     }
 
-    /// <summary>حلقة طلاء بيضاء باهتة (بليت قديم على العشب).</summary>
-    Sprite PaintRingSprite()
+    /// <summary>لوحة إعلانية: لوح ملوّن على عمودين (يواجه -Z بعد الدوران 0).</summary>
+    static void AddBillboard(MeshAccumulator acc, Vector3 origin, float yawDeg, Color panel, Color post)
     {
-        const int S = 256;
-        Texture2D tex = new Texture2D(S, S, TextureFormat.RGBA32, false);
-        tex.filterMode = FilterMode.Bilinear;
-
-        var rng = new System.Random(808);
-        Color[] px = new Color[S * S];
-        float c = S * 0.5f;
-
-        for (int y = 0; y < S; y++)
-        {
-            for (int x = 0; x < S; x++)
-            {
-                float d = Mathf.Sqrt((x + 0.5f - c) * (x + 0.5f - c) + (y + 0.5f - c) * (y + 0.5f - c));
-                float band = Mathf.SmoothStep(96f, 101f, d) * (1f - Mathf.SmoothStep(117f, 122f, d));
-                float erode = (float)rng.NextDouble() < 0.28f ? 0.35f : 1f; // طلاء متآكل
-                float a = band * 0.52f * erode;
-                px[y * S + x] = new Color(1f, 1f, 1f, Mathf.Clamp01(a));
-            }
-        }
-
-        tex.SetPixels(px);
-        tex.Apply(false, false);
-
-        Sprite sp = Sprite.Create(tex, new Rect(0, 0, S, S), new Vector2(0.5f, 0.5f), 64f);
-        sp.name = "PaintRingSprite";
-        return sp;
-    }
-
-    /// <summary>قاعدة عمود البوابة: صفيحة داكنة + صرة معدنية.</summary>
-    Sprite PostBaseSprite()
-    {
-        const int S = 40;
-        Texture2D tex = new Texture2D(S, S, TextureFormat.RGBA32, false);
-        tex.filterMode = FilterMode.Bilinear;
-
-        Color[] px = new Color[S * S];
-        float c = S * 0.5f;
-
-        for (int y = 0; y < S; y++)
-        {
-            for (int x = 0; x < S; x++)
-            {
-                float d = Mathf.Sqrt((x + 0.5f - c) * (x + 0.5f - c) + (y + 0.5f - c) * (y + 0.5f - c));
-                Color col = new Color(0, 0, 0, 0);
-                if (d < 17f) col = new Color(0.13f, 0.13f, 0.15f, 1f);   // الصفيحة
-                if (d < 16f && (x + y) > S) col *= 0.65f;                 // ظل نصفها
-                if (d < 8f) col = new Color(0.34f, 0.35f, 0.38f, 1f);     // الصرة
-                if (d < 6.2f && d > 4.6f) col = new Color(0.55f, 0.56f, 0.60f, 1f); // حلقة
-                if (d < 3f) col = new Color(0.12f, 0.12f, 0.14f, 1f);     // المركز
-                if (d > 16.2f && d < 17.4f) col = new Color(0.05f, 0.05f, 0.06f, 0.9f); // حافة
-                px[y * S + x] = col;
-            }
-        }
-
-        tex.SetPixels(px);
-        tex.Apply(false, false);
-
-        Sprite sp = Sprite.Create(tex, new Rect(0, 0, S, S), new Vector2(0.5f, 0.5f), 32f);
-        sp.name = "PostBaseSprite";
-        return sp;
-    }
-
-    /// <summary>لافتة البوابة: رقعة شطرنج 2×12 مع إطار ولمعة علوية (1.25×11.75 وحدة).</summary>
-    Sprite BannerSprite()
-    {
-        const int SW = 40, SH = 376;
-        Texture2D tex = new Texture2D(SW, SH, TextureFormat.RGBA32, false);
-        tex.filterMode = FilterMode.Bilinear;
-
-        Color black = new Color(0.10f, 0.10f, 0.11f);
-        Color white = new Color(0.93f, 0.93f, 0.93f);
-        Color frame = new Color(0.16f, 0.16f, 0.18f);
-
-        Color[] px = new Color[SW * SH];
-
-        for (int y = 0; y < SH; y++)
-        {
-            for (int x = 0; x < SW; x++)
-            {
-                Color c;
-                if (x < 3 || x >= SW - 3 || y < 3 || y >= SH - 3) c = frame;
-                else
-                {
-                    int col = (x - 3) / 17;          // خليتان عرضياً
-                    int row = (y - 3) / 31;          // 12 خلية طولياً
-                    c = (col + row) % 2 == 0 ? white : black;
-                    float n = ((x * 31 + y * 17) % 9) * 0.006f;
-                    c.r = Mathf.Clamp01(c.r + n); c.g = Mathf.Clamp01(c.g + n); c.b = Mathf.Clamp01(c.b + n);
-                }
-                px[y * SW + x] = c;
-            }
-        }
-
-        // لمعة الحافة الغربية (جهة الشمس)
-        for (int y = 0; y < SH; y++)
-        {
-            Color c = px[y * SW + 3];
-            px[y * SW + 3] = new Color(Mathf.Clamp01(c.r + 0.22f), Mathf.Clamp01(c.g + 0.22f), Mathf.Clamp01(c.b + 0.22f), 1f);
-        }
-
-        tex.SetPixels(px);
-        tex.Apply(false, false);
-
-        Sprite sp = Sprite.Create(tex, new Rect(0, 0, SW, SH), new Vector2(0.5f, 0.5f), 32f);
-        sp.name = "BannerSprite";
-        return sp;
-    }
-
-    // ================= أداة دوائر ناعمة مشتركة =================
-
-    static void SoftCircle(Color[] px, int S, float cx, float cy, float r, Color c, float soft = 2.5f)
-    {
-        int xa = Mathf.Max(0, Mathf.FloorToInt(cx - r - soft));
-        int xb = Mathf.Min(S - 1, Mathf.CeilToInt(cx + r + soft));
-        int ya = Mathf.Max(0, Mathf.FloorToInt(cy - r - soft));
-        int yb = Mathf.Min(S - 1, Mathf.CeilToInt(cy + r + soft));
-
-        for (int y = ya; y <= yb; y++)
-        {
-            for (int x = xa; x <= xb; x++)
-            {
-                float d = Mathf.Sqrt((x + 0.5f - cx) * (x + 0.5f - cx) +
-                                     (y + 0.5f - cy) * (y + 0.5f - cy));
-                float a = 1f - Mathf.SmoothStep(r - soft, r, d);
-                if (a <= 0f) continue;
-                Color src = c; src.a *= a;
-                Color dst = px[y * S + x];
-                if (src.a >= dst.a) px[y * S + x] = src;
-            }
-        }
+        float px = origin.x, pz = origin.z;
+        acc.AddBox(new Vector3(px - 2.2f, 0.7f, pz), new Vector3(0.16f, 1.4f, 0.16f), 0.5f, post, post);
+        acc.AddBox(new Vector3(px + 2.2f, 0.7f, pz), new Vector3(0.16f, 1.4f, 0.16f), 0.5f, post, post);
+        acc.AddBox(new Vector3(px, 1.75f, pz), new Vector3(5.6f, 1.5f, 0.22f), 0.5f, panel, panel * 0.75f);
+        // إطار أبيض رقيق أعلى وأسفل اللوح
+        acc.AddBox(new Vector3(px, 2.56f, pz), new Vector3(5.6f, 0.12f, 0.24f), 0.5f, Color.white, Color.white * 0.8f);
+        acc.AddBox(new Vector3(px, 0.96f, pz), new Vector3(5.6f, 0.12f, 0.24f), 0.5f, Color.white, Color.white * 0.8f);
     }
 }

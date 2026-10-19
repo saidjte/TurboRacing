@@ -4,8 +4,10 @@ using UnityEngine.UI;
 
 /// <summary>
 /// يبني محتوى المشهد بالكود عند بدء اللعبة:
-/// الحلبة (Tilemap) + السيارة + الكانفاس والأزرار اللمسية + نظام الأحداث + الكاميرا.
+/// الحلبة المجسّمة + السيارة المجسّمة + الإضاءة الشمسية والظلال + الكانفاس
+/// والأزرار اللمسية + نظام الأحداث + الكاميرا المنظورية.
 /// الهدف: مشروع يعمل دون أي إعداد يدوي في محرر Unity.
+/// v1.0.0: عالم ثلاثي الأبعاد حقيقي (XZ أرض، Y سماء) — الواجهات والصوت واللعب كما هي.
 /// </summary>
 public class GameBootstrap : MonoBehaviour
 {
@@ -20,19 +22,20 @@ public class GameBootstrap : MonoBehaviour
         Screen.autorotateToPortraitUpsideDown = false;
         Screen.orientation = ScreenOrientation.AutoRotation;
 
-        CreateTrack();          // المرحلة 2: الحلبة أولاً حتى تنطلق السيارة من خط البداية
+        CreateTrack();          // الحلبة أولاً حتى تنطلق السيارة من خط البداية
+        CreateLighting();       // (v1.0.0) شمس + ظلال حقيقية + ضباب + إضاءة محيطية
         CreateCar();
-        CreateAudio();          // المرحلة 5 (v0.7.0): مدير الصوت الإجرائي + آثار الإطارات
+        CreateAudio();          // مدير الصوت الإجرائي + آثار الإطارات
         CreateCanvasAndButtons();
-        CreateHUD();            // المرحلة 3: عداد اللفات والمؤقت
-        CreateMenus();          // المرحلة 4: القائمة الرئيسية + النتائج + الإيقاف المؤقت
-        CreateCinematicOverlay(); // (v0.9.0) فينييت سينمائي تحت كل الواجهات
+        CreateHUD();            // عداد اللفات والمؤقت
+        CreateMenus();          // القائمة الرئيسية + النتائج + الإيقاف المؤقت + الإعدادات
+        CreateCinematicOverlay(); // فينييت سينمائي تحت كل الواجهات
         CreateEventSystem();
         SetupCamera();
-        CreateRaceFlow();       // المرحلة 4: آلة حالات السباق (أخيراً حتى يجد كل شيء)
+        CreateRaceFlow();       // آلة حالات السباق (أخيراً حتى يجد كل شيء)
     }
 
-    // ================= الصوت والمؤثرات (المرحلة 5) =================
+    // ================= الصوت والمؤثرات =================
 
     void CreateAudio()
     {
@@ -43,7 +46,44 @@ public class GameBootstrap : MonoBehaviour
         new GameObject("SkidMarks").AddComponent<SkidMarks>();
     }
 
-    // ================= السيارة =================
+    // ================= الإضاءة المجسّمة (v1.0.0) =================
+
+    void CreateLighting()
+    {
+        // شمس اتجاهية بظلال ناعمة — أقوى إشارة عمق في العالم المجسّم
+        GameObject sunGO = new GameObject("Sun");
+        Light sun = sunGO.AddComponent<Light>();
+        sun.type = LightType.Directional;
+        sun.color = new Color(1f, 0.965f, 0.90f);   // دفء شمسي خفيف
+        sun.intensity = 1.05f;
+        sun.shadows = LightShadows.Soft;
+        sun.shadowStrength = 0.78f;
+        sun.shadowResolution = UnityEngine.Rendering.ShadowResolution._1024; // موبايل
+        sun.shadowNormalBias = 0.06f;
+        sunGO.transform.rotation = Quaternion.Euler(50f, -28f, 0f);
+
+        // إضاءة محيطية ثلاثية (سماء زرقاء / أفق محايد / انعكاس أرضي خضري)
+        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
+        RenderSettings.ambientSkyColor = new Color(0.55f, 0.63f, 0.78f);
+        RenderSettings.ambientEquatorColor = new Color(0.50f, 0.50f, 0.52f);
+        RenderSettings.ambientGroundColor = new Color(0.30f, 0.33f, 0.26f);
+        RenderSettings.sun = sun;
+
+        // ضباب سينمائي (المدى يُعاد ضبطه عند تبديل وضعي الكاميرا)
+        Color haze = new Color(0.62f, 0.76f, 0.94f);
+        RenderSettings.fog = true;
+        RenderSettings.fogMode = FogMode.Linear;
+        RenderSettings.fogColor = haze;
+        RenderSettings.fogStartDistance = 55f;
+        RenderSettings.fogEndDistance = 170f;
+
+        // مسافة الظلال ودرجتها (موبايل)
+        QualitySettings.shadows = ShadowQuality.All;
+        QualitySettings.shadowDistance = 85f;
+        QualitySettings.shadowCascades = 1;
+    }
+
+    // ================= السيارة المجسّمة =================
 
     void CreateCar()
     {
@@ -52,62 +92,39 @@ public class GameBootstrap : MonoBehaviour
         // الانطلاق من خط البداية على الحلبة (أو المركز احتياطياً)
         if (TrackBuilder.Instance != null)
         {
-            car.transform.position = TrackBuilder.Instance.StartPosition;
-            car.transform.rotation = Quaternion.Euler(0f, 0f, TrackBuilder.Instance.StartRotationZ);
+            car.transform.position = TrackBuilder.Instance.StartPosition; // y = 0 (الأرض)
+            car.transform.rotation = Quaternion.Euler(0f, TrackBuilder.Instance.StartYaw, 0f);
         }
         else
         {
             car.transform.position = Vector3.zero;
         }
 
-        // (v0.8.0) سيارة مرسومة إجرائياً من طبقتين:
-        // CarBody: هيكل أبيض يُلوّن بطلاء اللاعب من الإعدادات
-        // CarTrim: تفاصيل ثابتة (عجلات/قمرة/جناح/مصابيح) فوق الهيكل
-        // السبرايت 128×256 بـ PPU=128 = 1×2 وحدة عالمية — نفس أبعاد القديم تماماً
         GameSettings.EnsureLoaded();
 
-        GameObject bodyGO = new GameObject("CarBody");
-        bodyGO.transform.SetParent(car.transform, false);
-        SpriteRenderer bodySR = bodyGO.AddComponent<SpriteRenderer>();
-        bodySR.sprite = CarSkin.Body();
-        bodySR.sortingOrder = 10;
-        bodySR.color = GameSettings.CurrentColor;
+        // الجسم المجسّم (هيكل + تفاصيل + عجلات) يبنيه CarModel3D داخل CarController.Awake.
+        // هنا فقط: فيزياء ثلاثية الأبعاد + مصادم صندوقي بمساحة القيادة القديمة.
+        car.AddComponent<Rigidbody>(); // CarController يضبط خصائصه في Awake
 
-        GameObject trimGO = new GameObject("CarTrim");
-        trimGO.transform.SetParent(car.transform, false);
-        SpriteRenderer trimSR = trimGO.AddComponent<SpriteRenderer>();
-        trimSR.sprite = CarSkin.Trim();
-        trimSR.sortingOrder = 11;
-        trimSR.color = Color.white;
+        BoxCollider box = car.AddComponent<BoxCollider>();
+        box.center = new Vector3(0f, 0.45f, 0.05f);
+        box.size = new Vector3(CarModel3D.ColliderWidth, CarModel3D.ColliderHeight, CarModel3D.ColliderLength);
 
-        // (v0.9.0) ظل أرضي تحت السيارة: أقوى إشارة عمق في المنظور العلوي/المطاردة
-        GameObject shadowGO = new GameObject("CarShadow");
-        shadowGO.transform.SetParent(car.transform, false);
-        SpriteRenderer shadowSR = shadowGO.AddComponent<SpriteRenderer>();
-        shadowSR.sprite = CarSkin.Shadow();
-        shadowSR.sortingOrder = 9; // فوق آثار الإطارات وتحت الهيكل
-        shadowSR.color = new Color(0f, 0f, 0f, 0.85f);
-        shadowGO.transform.localPosition = new Vector3(0.12f, -0.16f, 0f);
-        shadowGO.transform.localScale = new Vector3(1.12f, 1.07f, 1f);
-
-        car.AddComponent<Rigidbody2D>(); // CarController يضبط خصائصه في Awake
-        BoxCollider2D box = car.AddComponent<BoxCollider2D>();
-        box.size = new Vector2(1f, 2f); // 1×2 وحدات عالمية (السبرايت أصلاً بهذا القياس الآن)
         car.AddComponent<CarController>();
-        car.AddComponent<SurfaceChecker>(); // المرحلة 2: عقاب العشب
+        car.AddComponent<SurfaceChecker>(); // عقاب العشب
     }
 
-    // ================= الحلبة (المرحلة 2) =================
+    // ================= الحلبة =================
 
     void CreateTrack()
     {
-        // TrackBuilder يبني الطبقات الثلاث (عشب/طريق/جدران) فوراً في Awake الخاص به
+        // TrackBuilder يبني العالم المجسّم فوراً في Awake الخاص به
         GameObject track = new GameObject("Track");
         track.AddComponent<TrackBuilder>();
-        track.AddComponent<LapManager>(); // المرحلة 3: بوابات اللفة والتوقيت والحفظ
+        track.AddComponent<LapManager>(); // بوابات اللفة والتوقيت والحفظ
     }
 
-    // ================= واجهة السباق (المرحلة 3) =================
+    // ================= واجهة السباق =================
 
     void CreateHUD()
     {
@@ -115,11 +132,11 @@ public class GameBootstrap : MonoBehaviour
         new GameObject("RaceHUD").AddComponent<RaceHUD>();
     }
 
-    // ================= واجهات القوائم (المرحلة 4) =================
+    // ================= واجهات القوائم =================
 
     void CreateMenus()
     {
-        new GameObject("SettingsUI").AddComponent<SettingsUI>(); // (v0.8.0) صفحة الإعدادات (ترتيب 50)
+        new GameObject("SettingsUI").AddComponent<SettingsUI>(); // صفحة الإعدادات (ترتيب 50)
         new GameObject("MenuUI").AddComponent<MenuUI>();         // القائمة الرئيسية (ترتيب 40)
         new GameObject("ResultsUI").AddComponent<ResultsUI>();   // شاشة النتائج (ترتيب 30)
         new GameObject("PauseUI").AddComponent<PauseUI>();       // الإيقاف المؤقت (ترتيب 20)
@@ -131,7 +148,7 @@ public class GameBootstrap : MonoBehaviour
         new GameObject("RaceFlow").AddComponent<RaceFlow>();
     }
 
-    // ================= فينييت سينمائي (v0.9.0) =================
+    // ================= فينييت سينمائي =================
 
     /// <summary>
     /// طبقة تعتيم رقيقة على أطراف الشاشة (ترتيب -10: فوق العالم وتحت كل الواجهات)
@@ -188,7 +205,7 @@ public class GameBootstrap : MonoBehaviour
         return sp;
     }
 
-    // ================= الكاميرا =================
+    // ================= الكاميرا المنظورية =================
 
     void SetupCamera()
     {
@@ -198,14 +215,17 @@ public class GameBootstrap : MonoBehaviour
         Camera cam = camGO.GetComponent<Camera>();
         if (cam != null)
         {
-            cam.orthographic = true;
-            cam.orthographicSize = 7f;
+            // منظور حقيقي: أفق + سماء + عمق متناقص
+            cam.orthographic = false;
+            cam.fieldOfView = 58f;
+            cam.nearClipPlane = 0.3f;
+            cam.farClipPlane = 600f;
             cam.clearFlags = CameraClearFlags.SolidColor;
-            cam.backgroundColor = new Color(0.15f, 0.22f, 0.13f); // أخضر داكن خارج الحلبة
+            cam.backgroundColor = new Color(0.62f, 0.76f, 0.94f); // نفس لون الضباب = أفق سلس
         }
         camGO.AddComponent<CameraFollow>();
 
-        // (v0.7.0) مستمع صوتي واحد على الكاميرا — بلا لم يُسمع أي صوت مولّد
+        // مستمع صوتي واحد على الكاميرا
         if (camGO.GetComponent<AudioListener>() == null)
             camGO.AddComponent<AudioListener>();
     }
@@ -228,13 +248,9 @@ public class GameBootstrap : MonoBehaviour
 
         RectTransform canvasRT = canvasGO.GetComponent<RectTransform>();
 
-        // التخطيط القياسي لألعاب السباق بالتسارع التلقائي (v0.6.0):
+        // التخطيط القياسي لألعاب السباق بالتسارع التلقائي:
         // - زرا التوجيه مجمّعان معاً أسفل اليسار (إبهام أيسر واحد يوجه)
-        // - زر الفرامل كبير أسفل اليمين (إبهام أيمن يفرمل) - بعيداً عن منتصف الشاشة
-        //   حيث تظهر السيارة مع كاميرا المطاردة، وبمسافة مريحة من حواف الجهاز
-        //   (القياسات بوحدات كانفاس 1920×1080 مع مطابقة الارتفاع)
-
-        // اليسار: زرا التوجيه جنباً إلى جنب
+        // - زر الفرامل كبير أسفل اليمين (إبهام أيمن يفرمل)
         CreateButton(canvasRT, "BtnLeft",
             new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(0.5f, 0.5f),
             new Vector2(250f, 240f), new Vector2(300f, 300f));
@@ -243,7 +259,6 @@ public class GameBootstrap : MonoBehaviour
             new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(0.5f, 0.5f),
             new Vector2(580f, 240f), new Vector2(300f, 300f));
 
-        // اليمين: الفرامل (أكبر حجماً لسهولة الوصول)
         CreateButton(canvasRT, "BtnBrake",
             new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(0.5f, 0.5f),
             new Vector2(-250f, 240f), new Vector2(340f, 340f));
@@ -279,7 +294,7 @@ public class GameBootstrap : MonoBehaviour
         trt.offsetMax = Vector2.zero;
 
         Text text = textGO.GetComponent<Text>();
-        text.font = UiKit.UIFont; // خط حقيقي مضمّن (v0.6.1) يُصيَّر بشكل مضمون على الأجهزة
+        text.font = UiKit.UIFont; // خط حقيقي مضمّن يُصيَّر بشكل مضمون على الأجهزة
         text.fontSize = 72;
         text.alignment = TextAnchor.MiddleCenter;
         text.color = Color.white;
@@ -293,20 +308,5 @@ public class GameBootstrap : MonoBehaviour
         if (FindFirstObjectByType<EventSystem>() != null) return;
 
         new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
-    }
-
-    // ================= أدوات مساعدة =================
-
-    Sprite MakeSolidSprite(int size)
-    {
-        Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
-        Color[] pixels = new Color[size * size];
-        Color white = Color.white;
-        for (int i = 0; i < pixels.Length; i++) pixels[i] = white;
-        tex.SetPixels(pixels);
-        tex.Apply(false, false);
-
-        // عدد البكسل كـ Pixels Per Unit => سبرايت 1x1 وحدة عالمية
-        return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), size);
     }
 }
