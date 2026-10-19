@@ -1,29 +1,26 @@
 using System.Collections.Generic;
+using MotionCore.Vehicle.Core;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 /// <summary>
-/// TurboRacing - v1.3.0 (محرك PROMETEO: Car Controller)
+/// TurboRacing - v1.5.0 (محرك الفيزياء MotionCore Vehicle — الأصل المطلوب من المستخدم)
 /// واجهة قيادة (facade) تُبقي واجهتنا العامة المعتمدة كما هي، وداخلها الفيزياء الحقيقية
-/// من PrometeoCarController (WheelColliders + تعليق + نقل ثقل + انزلاق):
-/// - سرعات أعلى (v1.3.0): STOCK 72 / SPORT 80 / TURBO 88 كم/س بدل 50/56/61
-///   مع فرملة أقوى ورجوع أسرع، وتوجيه يتقلّص زاويته مع السرعة لثبات أعلى
-///   (أسلوب المضامير الأركيد في مراجعات مثل Multiversal Vehicle Controller)
-/// - قيادة يدوية كاملة (v1.2.0): زر بنزين GAS للتسارع — لم تعد السيارة تتحرك من تلقاء نفسها،
-///   وبدون ضغط تتدحرج وتتباطأ بأسلوب Prometeo الأصلي (DecelerateCar بإيقاعه المرجعي 0.1ث)
-/// - زر الفرامل: فرملة فعلية أثناء الحركة ثم رجوع بطيء عند التوقف تقريباً (أسلوب الموبايل)
-/// - تماسك إطارات مرفوع (v1.2.0): صلابة جانبية 1.8 ومنحنى أضيق = توجيه مثبت بلا انزلاق شديد
-/// - التوجيه: TurnLeft/TurnRight/ResetSteeringAngle من Prometeo مباشرة
-/// - وضع externalControl في نسخة Prometeo (تعديل مصرّح به ملاحظة المؤلف) يعطّل مدخلات
-///   الكيبورد المدمجة ويُبقي حساب السرعة/الانزلاق وتحريك عجلات النموذج
-/// - إصلاح انقلاب ذاتي: لو انقلبت السيارة (فيزياء حقيقية) تعود واقفة بعد لحظة
-/// - عقاب العشب عبر SetSpeedLimit (حد السرعة) + SetGripOverride (تماسك WheelColliders)
-/// - لون السيارة: اختيار أقرب دهان من دهانات ARCADE الخمسة (نسيج حقيقي كامل)
+/// من MotionCore VehicleControllerBase (WheelColliders + تعليق + نقل ثقل + توجيه موزون بالسرعة):
+/// - سرعات فيزياء حقيقية: الموديلات 195-235 كم/س (معامل تحويل المواصفات 2.6×)
+///   مع منحنى عزم أركيد قوي من الوقوف وثابت عند القصوى، وتوجيه 36° وقوفاً ← 9° قصوى
+/// - قيادة يدوية كاملة (v1.2.0 كما هي): زر بنزين GAS للتسارع — لم تعد السيارة تتحرك
+///   من تلقاء نفسها؛ بدون ضغط تدحرج طبيعي بفرملة خمول MotionCore (idleBrakeTorque)
+/// - زر الفرامل: فرملة فعلية أثناء الحركة ثم رجوع تلقائي عند التوقف (منطق MotionCore)
+/// - تماسك مرجعي من مصنع MotionCore (fwd 1.5 / side 1.9) + قوة ضغط تزيد مع السرعة
+///   + مضاد انقلاب (anti-roll) — علاج الانزلاق من تصميم المحرك نفسه
+/// - الإدخال: خاصية CurrentCarInput يقرؤها المتحكم قبل كل خطوة فيزياء —
+///   سيارة اللاعب = أزرار اللمس، سيارة المنافس = أوامر AiDriver (سقف سرعة خارجي)
+/// - إصلاح انقلاب ذاتي + عقاب العشب عبر مزوّد السطح (تصنيف الأرض من اسم المصادم)
+/// - v1.4.0: تعدد الموديلات — 8 سيارات حقيقية من Racing Cars Pack 1 + 6 إجرائية،
+///   تُختار من الكراج ويعاد بناؤها عند التغيير (ApplySelectedModel)
 /// - أزرار اللمس + تتبع الأصابع (v0.6.8) + أيقونات مرسومة مستقلة عن الخطوط (v1.2.0)
-/// - v1.4.0: تعدد الموديلات — الموديل يُختار من الكراج (GameSettings.SelectedCarModel)
-///   ويعاد بناؤه عند التغيير (ApplySelectedModel) + سيارات المنافسين (isAi):
-///   بلا واجهة لمسية وبأوامر قيادة عامة (AiThrottle/AiBrake/AiSteer/AiReverse)
 /// </summary>
 [RequireComponent(typeof(Rigidbody))]
 public class CarController : MonoBehaviour
@@ -52,8 +49,13 @@ public class CarController : MonoBehaviour
     private readonly Dictionary<string, Color> pressedColors = new Dictionary<string, Color>();
 
     private Rigidbody rb;
-    private PrometeoCarController pcc;
+    private MotionCoreVehicleController mc;   // v1.5.0: محرك الفيزياء MotionCore
+    private MotionCoreSurface mcSurface;      // v1.5.0: مزوّد السطح (عقاب العشب/الحصى)
     private readonly WheelCollider[] wheels = new WheelCollider[4]; // FL FR RL RR
+
+    // --- v1.5.0: مدخلات اللحظة (اللاعب من اللمس، المنافس من AiDriver) ---
+    private CarInput playerInput;
+    private CarInput aiInput;
 
     // --- v1.4.0: تعدد الموديلات + سيارات المنافسين ---
     public bool isAi;                 // سيارة منافسة: بلا أزرار لمسية وبلا صوت تصادم اللاعب
@@ -81,13 +83,9 @@ public class CarController : MonoBehaviour
     // --- إصلاح الانقلاب ---
     private float flipTimer;
 
-    // --- التدحرج الطبيعي (v1.2.0): أسلوب Prometeo الأصلي لتباطؤ السيارة بلا مدخلات ---
-    private bool coasting;
-    const float CoastInvokeInterval = 0.1f; // الإيقاع المرجعي في Prometeo نفسه
-
-    // خصائص للقراءة من سكربتات أخرى (الواجهة المعتمدة كما هي)
-    public float SpeedKmh => pcc != null ? Mathf.Abs(pcc.carSpeed)
-                                         : (rb != null ? rb.linearVelocity.magnitude * 3.6f : 0f);
+    /// <summary>السرعة الحالية كم/س (من فيزياء MotionCore).</summary>
+    public float SpeedKmh => mc != null ? mc.SpeedKph
+                                        : (rb != null ? rb.linearVelocity.magnitude * 3.6f : 0f);
     public bool IsBraking => holdingBrake && ForwardSpeed() > 0.5f;
 
     /// <summary>السرعة الحالية نسبةً إلى الحد الأقصى (0..1) — للصوت والآثار.</summary>
@@ -97,6 +95,28 @@ public class CarController : MonoBehaviour
     public bool IsAccelerating => holdingGas;
     /// <summary>مُصدِّر مادة الطلاء (يستخدمه SurfaceChecker للتلطيخ على العشب).</summary>
     public MeshRenderer PaintRenderer => paintRenderer;
+
+    /// <summary>
+    /// مدخلات الفيزياء الحالية — يقرؤها MotionCore قبل كل خطوة فيزياء:
+    /// سيارة اللاعب = أزرار اللمس، سيارة المنافس = أوامر AiDriver.
+    /// التجميد (قائمة/عد/نهاية) يصفّرها تلقائياً.
+    /// </summary>
+    public CarInput CurrentCarInput
+    {
+        get
+        {
+            if (rb != null && (rb.constraints & RigidbodyConstraints.FreezePosition) != 0)
+                return default; // مجمّدة: لا مدخلات إطلاقاً
+
+            if (isAi) return aiInput;
+
+            playerInput = default;
+            playerInput.Steer = (holdingLeft ? -1f : 0f) + (holdingRight ? 1f : 0f);
+            if (holdingBrake) playerInput.Brake = 1f;       // فرامل ثم رجوع (منطق MotionCore)
+            else if (holdingGas) playerInput.Throttle = 1f; // القيادة اليدوية
+            return playerInput;
+        }
+    }
 
     void Awake()
     {
@@ -148,47 +168,48 @@ public class CarController : MonoBehaviour
         DriveButtonsLayout.Apply(this);
     }
 
-    /// <summary>دهان السيارة وفق الإعدادات (v1.4.0): الفهرس 0 = دهان المصنع —
-    /// موديلات الكراج (1..5) تحتفظ بلونها المميز، ونموذج ARCADE يعود لأحمره الكلاسيكي.
+    /// <summary>دهان السيارة وفق الإعدادات (v1.5.0): الفهرس 0 = دهان المصنع —
+    /// كل الموديلات تحتفظ بمظهرها الأصلي (نسيج سيارات الحزمة الحقيقية أو لون الإجرائية).
     /// أي لون آخر يعيد تلوين أي موديل كما في الإصدارات السابقة.</summary>
     public void ApplyModelPaint()
     {
         int model = builtModel >= 0 ? builtModel : 0;
-        if (GameSettings.CarColorIndex == 0 && model != 0)
+        if (GameSettings.CarColorIndex == 0)
             SetBodyColor(CarModels.Get(model).paint);
         else
             SetBodyColor(GameSettings.CurrentColor);
     }
 
-    // ================= بناء السيارة (نموذج الكراج المختار + فيزياء Prometeo) =================
+    // ================= بناء السيارة (نموذج الكراج المختار + فيزياء MotionCore) =================
 
     void BuildCar()
     {
         // v1.4.0: الموديل من الكراج (اللاعب) أو مفروض (المنافسون)
         int model = forcedModel >= 0 ? forcedModel : GameSettings.SelectedCarModel;
         builtModel = model;
+        CarModels.CarSpec spec = CarModels.Get(model);
 
-        usingArcadeAsset = model == 0 && TryBuildArcadeModel(out modelRoot);
-        if (usingArcadeAsset)
+        if (spec.packIndex < 0 && spec.bodyType < 0)
         {
-            // نموذج ARCADE الأصلي (افتراضي اللاعب)
-        }
-        else if (model == 0)
-        {
-            // الاحتياطي: السيارة الكلاسيكية الإجرائية (CarModel3D) — نفس جودة اللعب بلا الأصل الخارجي
-            CarModel3D.Handles h = CarModel3D.Build(transform);
-            paintRenderer = h.Paint;
-            modelRoot = h.BodyPivot != null ? h.BodyPivot.root.gameObject.transform : transform;
-            if (h.Wheels != null)
+            // ARCADE GT: النموذج الأصلي أولاً ثم الكلاسيكية الإجرائية
+            usingArcadeAsset = TryBuildArcadeModel(out modelRoot);
+            if (!usingArcadeAsset)
             {
-                for (int i = 0; i < 4 && i < h.Wheels.Length; i++)
-                    wheelMeshes[i] = h.Wheels[i]; // محاور العجلات الإجرائية = مواضع العجلات
+                CarModel3D.Handles h = CarModel3D.Build(transform);
+                paintRenderer = h.Paint;
+                modelRoot = h.BodyPivot != null ? h.BodyPivot.root.gameObject.transform : transform;
+                if (h.Wheels != null)
+                {
+                    for (int i = 0; i < 4 && i < h.Wheels.Length; i++)
+                        wheelMeshes[i] = h.Wheels[i];
+                }
             }
         }
         else
         {
-            // v1.4.0: موديلات الكراج الإجرائية (CarModels)
-            CarModels.Handles mh = CarModels.Build(transform, CarModels.Get(model));
+            // v1.5.0: سيارات Racing Cars Pack 1 الحقيقية + موديلات الكراج الإجرائية
+            // (CarModels.Build يقرر: packIndex >= 0 = حقيقي، وإلا إجرائي)
+            CarModels.Handles mh = CarModels.Build(transform, spec);
             paintRenderer = mh.Paint;
             modelRoot = mh.Root;
             for (int i = 0; i < 4; i++) wheelMeshes[i] = mh.Wheels[i];
@@ -214,32 +235,73 @@ public class CarController : MonoBehaviour
         // مصادمات العجلات الأربعة عند مواضع عقد العجلات الفعلية
         BuildWheelColliders();
 
-        // متحكم Prometeo: وضع التحكم الخارجي (ندرس المدخلات ونمرر الأوامر)
-        // (v1.4.0: يُعاد استخدامه عبر إعادة بناء الموديل بدل إضافته من جديد)
-        if (pcc == null) pcc = gameObject.AddComponent<PrometeoCarController>();
-        pcc.externalControl = true;
-        pcc.useTouchControls = false;
-        pcc.useUI = false;
-        pcc.useSounds = false; // نظام الصوت المعتمد (SoundManager) يبقى مصدر الصوت
-        pcc.useEffects = true;
+        // v1.5.0: مزوّد السطح قبل المتحكم (أساس MotionCore يبحث عنه في Awake)
+        mcSurface = gameObject.AddComponent<MotionCoreSurface>();
 
-        pcc.frontLeftMesh  = wheelMeshes[0] != null ? wheelMeshes[0].gameObject : null;
-        pcc.frontRightMesh = wheelMeshes[1] != null ? wheelMeshes[1].gameObject : null;
-        pcc.rearLeftMesh   = wheelMeshes[2] != null ? wheelMeshes[2].gameObject : null;
-        pcc.rearRightMesh  = wheelMeshes[3] != null ? wheelMeshes[3].gameObject : null;
-        pcc.frontLeftCollider  = wheels[0];
-        pcc.frontRightCollider = wheels[1];
-        pcc.rearLeftCollider   = wheels[2];
-        pcc.rearRightCollider  = wheels[3];
-        pcc.bodyMassCenter = new Vector3(0f, 0.15f, 0f);
+        // v1.5.0: متحكم MotionCore — يقرأ CurrentCarInput من هذه الواجهة كل خطوة فيزياء
+        // (v1.4.0: يُعاد استخدامه عبر إعادة بناء الموديل بدل إضافته من جديد)
+        if (mc == null) mc = gameObject.AddComponent<MotionCoreVehicleController>();
+        mc.Facade = this;
+        ConfigureMotionCore();
 
         AttachDriftEffects();
+    }
 
-        // إعادة ربط مراجع المؤثرات بعد أي إعادة بناء (تُبنى مرة واحدة فقط)
-        pcc.RLWParticleSystem = smokeRL;
-        pcc.RRWParticleSystem = smokeRR;
-        pcc.RLWTireSkid = skidRL;
-        pcc.RRWTireSkid = skidRR;
+    /// <summary>تهيئة محرك MotionCore (v1.5.0): محاور من عقد النموذج + كتلة +
+    /// مركز كتلة منخفض + تماسك مرجعي + توجيه موزون بالسرعة. الضبط النهائي
+    /// (سرعة/عزم/زوايا) يأتي لاحقاً من ApplyTuning/ApplySpec حسب الموديل.</summary>
+    void ConfigureMotionCore()
+    {
+        if (mc == null) return;
+
+        GameObject com = new GameObject("Center Of Mass");
+        com.transform.SetParent(transform, false);
+        com.transform.localPosition = new Vector3(0f, -0.22f, 0.05f);
+
+        const float stiffnessF = 1.5f, stiffnessS = 1.9f; // مرجع MotionCore + صلابة جانبية أعلى
+
+        VehicleAxle front = new VehicleAxle
+        {
+            leftWheel = wheels[0], rightWheel = wheels[1],
+            leftVisual = wheelMeshes[0], rightVisual = wheelMeshes[1],
+            steering = true, handbrake = false, antiRollForce = 7000f,
+            cachedLeftForwardStiffness = stiffnessF, cachedLeftSideStiffness = stiffnessS,
+            cachedRightForwardStiffness = stiffnessF, cachedRightSideStiffness = stiffnessS
+        };
+        VehicleAxle rear = new VehicleAxle
+        {
+            leftWheel = wheels[2], rightWheel = wheels[3],
+            leftVisual = wheelMeshes[2], rightVisual = wheelMeshes[3],
+            steering = false, handbrake = true, antiRollForce = 7000f,
+            cachedLeftForwardStiffness = stiffnessF, cachedLeftSideStiffness = stiffnessS,
+            cachedRightForwardStiffness = stiffnessF, cachedRightSideStiffness = stiffnessS
+        };
+
+        MotionCoreSetup setup = new MotionCoreSetup
+        {
+            CenterOfMass = com.transform,
+            BodyMass = 1100f,
+            Axles = new[] { front, rear },
+            MaxMotorTorque = 4200f,
+            MaxBrakeTorque = 4200f,
+            IdleBrakeTorque = 240f,
+            MaxSpeedKph = 230f,
+            MaxReverseSpeedKph = 38f,
+            SteerAngleZero = 36f,
+            SteerAngleTop = 9f,
+            SteerInRate = 240f,
+            SteerReturnRate = 330f,
+            Downforce = 95f
+        };
+
+        mc.Configure(setup);
+
+        // ما فوّته Awake المبكر للمتحكم (قبل ضبط الحقول): نطبّقه يدوياً
+        rb.mass = setup.BodyMass;
+        if (setup.CenterOfMass != null)
+            rb.centerOfMass = transform.InverseTransformPoint(setup.CenterOfMass.position);
+        if (wheels[0] != null)
+            wheels[0].ConfigureVehicleSubsteps(5f, 12, 15);
     }
 
     /// <summary>تطبيق السيارة المختارة من الكراج (v1.4.0): إعادة بناء النموذج البصري إن تغيّر.
@@ -281,6 +343,14 @@ public class CarController : MonoBehaviour
         {
             wc.SetParent(null, false);
             Destroy(wc.gameObject);
+        }
+
+        // مركز الكتلة يُعاد بناؤه أيضاً (جديد مع MotionCore v1.5.0)
+        Transform com = transform.Find("Center Of Mass");
+        if (com != null)
+        {
+            com.SetParent(null, false);
+            Destroy(com.gameObject);
         }
 
         BuildCar();
@@ -507,7 +577,7 @@ public class CarController : MonoBehaviour
         }
     }
 
-    // ================= حلقة القيادة (توزيع الأوامر على Prometeo) =================
+    // ================= حلقة القيادة (v1.5.0: الإدخال يجري عبر CurrentCarInput) =================
 
     void Update()
     {
@@ -529,90 +599,10 @@ public class CarController : MonoBehaviour
 
     void FixedUpdate()
     {
-        if (pcc == null) return;
-
-        // (v1.4.0) سيارات المنافسين: الأوامر تصدر من AiDriver — هذه الحلقة للمؤثرات فقط
-        if (isAi)
-        {
-            UpdateDriftEffects();
-            CheckFlipRecovery();
-            return;
-        }
-
-        bool frozen = (rb.constraints & RigidbodyConstraints.FreezePosition) != 0;
-
-        if (frozen)
-        {
-            // أثناء العد التنازلي/القائمة: لا عزم ولا تدحرج (الـ Rigidbody مجمّد أصلاً)
-            SetCoasting(false);
-            pcc.ThrottleOff();
-            return;
-        }
-
-        // --- التوجيه (v1.3.0: زاوية توجيه تتقلص مع السرعة — ثبات أعلى بسرعات جديدة) ---
-        // عند التوقف كامل الزاوية للمناورة؛ وعند السرعة القصوى 60% منها فقط
-        // فلا تنقلب السيارة ولا تنزلق من حدة التوجيه، مع بقاء التماسك الجانبي المرفوع.
-        pcc.maxSteeringAngle = Mathf.RoundToInt(
-            Mathf.Lerp(baseSteerAngle, baseSteerAngle * 0.60f, Speed01));
-
-        if (holdingLeft && !holdingRight) pcc.TurnLeft();
-        else if (holdingRight && !holdingLeft) pcc.TurnRight();
-        else pcc.ResetSteeringAngle();
-
-        // --- القيادة اليدوية (v1.2.0): بنزين/فرامل/تدحرج طبيعي ---
-        float fwd = ForwardSpeed();
-        if (holdingBrake)
-        {
-            // الفرامل تتفوق على البنزين دائماً (أمان)
-            SetCoasting(false);
-            if (fwd > 1.2f)
-            {
-                pcc.ThrottleOff();
-                pcc.Brakes();
-            }
-            else
-            {
-                pcc.GoReverse();
-            }
-        }
-        else if (holdingGas)
-        {
-            // القيادة اليدوية: التسارع فقط أثناء الضغط على زر البنزين
-            SetCoasting(false);
-            pcc.GoForward();
-        }
-        else
-        {
-            // بلا مدخلات: تدحرج طبيعي — تباطؤ Prometeo المرجعي (DecelerateCar كل 0.1ث)
-            // يوقف السيارة كلياً تحت 0.25 م/ث ويلغي نفسه ذاتياً
-            SetCoasting(true);
-        }
-
+        // الإدخال يصل للمتحكم عبر خاصية CurrentCarInput (يقرؤها MotionCore كل خطوة).
+        // هذه الحلقة للمؤثرات والإنقاذ الذاتي فقط.
         UpdateDriftEffects();
         CheckFlipRecovery();
-    }
-
-    /// <summary>
-    /// تبديل وضع التدحرج الطبيعي (v1.2.0): تكرار DecelerateCar بإيقاع Prometeo المرجعي
-    /// (كل 0.1ث — لا أسرع) + تصفير الفرامل العالقة وعدم العزم فوراً عند الدخول في الوضع.
-    /// </summary>
-    void SetCoasting(bool on)
-    {
-        if (coasting == on) return;
-        coasting = on;
-        if (pcc == null) return;
-
-        if (on)
-        {
-            pcc.ThrottleOff();
-            for (int i = 0; i < 4; i++)
-                if (wheels[i] != null) wheels[i].brakeTorque = 0f; // لا فرامل عالقة أثناء التدحرج
-            pcc.InvokeRepeating("DecelerateCar", 0f, CoastInvokeInterval);
-        }
-        else
-        {
-            pcc.CancelInvoke("DecelerateCar");
-        }
     }
 
     float ForwardSpeed()
@@ -621,14 +611,32 @@ public class CarController : MonoBehaviour
         return Vector3.Dot(vel, transform.forward);
     }
 
-    // ================= المؤثرات (مزامنة نبضات Prometeo) =================
+    // ================= المؤثرات (حالة الانزلاق من MotionCore) =================
 
     void UpdateDriftEffects()
     {
-        // pcc.isDrifting يُحسب داخل GoForward/GoReverse عبر localVelocityX
-        // (يعمل لأن externalControl يُبقي حساب بيانات السيارة شغالاً في Update)
-        pcc.DriftCarPS();
+        if (mc == null) return;
+
+        bool drift = mc.IsDrifting;
+        if (drift == lastDrift) return;
+        lastDrift = drift;
+
+        if (drift)
+        {
+            if (smokeRL != null) smokeRL.Play();
+            if (smokeRR != null) smokeRR.Play();
+        }
+        else
+        {
+            if (smokeRL != null) smokeRL.Stop();
+            if (smokeRR != null) smokeRR.Stop();
+        }
+
+        if (skidRL != null) skidRL.emitting = drift;
+        if (skidRR != null) skidRR.emitting = drift;
     }
+
+    private bool lastDrift;
 
     // ================= إصلاح الانقلاب الذاتي =================
 
@@ -841,7 +849,8 @@ public class CarController : MonoBehaviour
     public void ResetInput()
     {
         holdingLeft = holdingRight = holdingBrake = holdingGas = false;
-        SetCoasting(false);
+        aiInput = default;
+        mc.ExternalSpeedCapKph = 0f;
 
         foreach (KeyValuePair<string, HashSet<int>> kv in holdPointers)
             kv.Value.Clear();
@@ -860,15 +869,14 @@ public class CarController : MonoBehaviour
     /// <summary>تخفيض حد السرعة (العشب). مثال: 0.45 = 45% من السرعة القصوى.</summary>
     public void SetSpeedLimit(float multiplier)
     {
-        if (pcc != null && maxSpeedKmh > 1f)
-            pcc.maxSpeed = Mathf.Max(8, Mathf.RoundToInt(maxSpeedKmh * Mathf.Clamp01(multiplier)));
+        if (mc != null && maxSpeedKmh > 1f)
+            mc.ApplySpeedLimitKph(maxSpeedKmh * Mathf.Clamp01(multiplier));
     }
 
     /// <summary>إرجاع حد السرعة الطبيعي (عند العودة إلى المسار).</summary>
     public void RestoreSpeedLimit()
     {
-        if (pcc != null && maxSpeedKmh > 1f)
-            pcc.maxSpeed = Mathf.RoundToInt(maxSpeedKmh);
+        if (mc != null) mc.RestoreTunedSpeed();
     }
 
     // ================= الضبط القابل للتخصيص (v0.8.0 → v1.4.0) =================
@@ -884,121 +892,94 @@ public class CarController : MonoBehaviour
     }
 
     /// <summary>
-    /// ضبط الأداء (v1.4.0): الأساس من مواصفات الموديل المختار من الكراج،
-    /// ومعامل الضبط (STOCK/SPORT/TURBO) يعمل كمُضاعِف سرعة (1.0 / 1.07 / 1.14)
-    /// — يحافظ على معنى الإعدادات القديمة مع أي موديل.
+    /// ضبط الأداء (v1.5.0 على MotionCore): سرعة الموديل تُرفع بمعامل تحويل
+    /// المواصفات (سرعات فيزياء حقيقية 195-235 كم/س)، ومعامل الضبط
+    /// (STOCK/SPORT/TURBO) يعمل كمُضاعِف (1.0 / 1.07 / 1.14).
     /// </summary>
     public void ApplyTuning(int preset, float steerSens)
     {
         CarModels.CarSpec spec = CarModels.Get(builtModel >= 0 ? builtModel : 0);
 
         float trim  = preset == 1 ? 1.07f : (preset == 2 ? 1.14f : 1f);
-        float pMax  = spec.topSpeed * trim;          // كم/س
-        int   pAcc  = spec.accel;                     // معامل عزم Prometeo (1..10)
-        float pSteer = preset == 1 ? 0.65f : (preset == 2 ? 0.72f : 0.58f); // سرعة عجلة القيادة
-        float pAngle = spec.steerAngle;               // أقصى زاوية توجيه
+        float pMax  = spec.topSpeed * CarModels.MotionCoreSpeedScale * trim; // كم/س حقيقية
+        float pTorque = 2400f + spec.accel * 260f;                           // نيوتن.متر
+        float pAngle = spec.steerAngle;
 
         maxSpeedKmh = pMax;
         baseSteerAngle = pAngle;
 
-        if (pcc != null)
+        if (mc != null)
         {
-            pcc.maxSpeed = Mathf.RoundToInt(pMax);
-            pcc.maxReverseSpeed = 30;
-            pcc.accelerationMultiplier = Mathf.Clamp(pAcc, 1, 10);
-            pcc.steeringSpeed = Mathf.Clamp(pSteer * Mathf.Clamp(steerSens, 0.5f, 2f), 0.1f, 1f);
-            pcc.maxSteeringAngle = Mathf.RoundToInt(pAngle);
-            pcc.brakeForce = spec.brakeForce;
-            pcc.decelerationMultiplier = 2;
-            pcc.handbrakeDriftMultiplier = 5;
+            mc.ConfigurePartial(new MotionCoreSetup
+            {
+                MaxMotorTorque = pTorque,
+                MaxSpeedKph = pMax
+            });
+            mc.ApplySteerSensitivity(steerSens);
             RestoreSpeedLimit();
         }
-
-        ApplyGrip();
     }
 
-    /// <summary>ضبط سيارة منافس من مواصفات الموديل + سقف مهارة (v1.4.0).</summary>
+    /// <summary>ضبط سيارة منافس من مواصفات الموديل + سقف مهارة (v1.5.0).</summary>
     public void ApplySpec(CarModels.CarSpec spec, float skillMul)
     {
-        maxSpeedKmh = spec.topSpeed * Mathf.Clamp(skillMul, 0.6f, 1f);
+        maxSpeedKmh = spec.topSpeed * CarModels.MotionCoreSpeedScale * Mathf.Clamp(skillMul, 0.6f, 1f);
         baseSteerAngle = spec.steerAngle;
 
-        if (pcc != null)
+        if (mc != null)
         {
-            pcc.maxSpeed = Mathf.Max(10, Mathf.RoundToInt(maxSpeedKmh));
-            pcc.maxReverseSpeed = 25;
-            pcc.accelerationMultiplier = Mathf.Clamp(spec.accel, 1, 10);
-            pcc.steeringSpeed = 0.55f;
-            pcc.maxSteeringAngle = Mathf.RoundToInt(spec.steerAngle);
-            pcc.brakeForce = spec.brakeForce;
-            pcc.decelerationMultiplier = 2;
-            pcc.handbrakeDriftMultiplier = 5;
+            mc.ConfigurePartial(new MotionCoreSetup
+            {
+                MaxMotorTorque = 2400f + spec.accel * 260f,
+                MaxSpeedKph = maxSpeedKmh
+            });
             RestoreSpeedLimit();
         }
-
-        ApplyGrip();
     }
 
-    // ================= أوامر قيادة سيارات المنافسين (v1.4.0) =================
+    // ================= أوامر قيادة سيارات المنافسين (v1.5.0 على MotionCore) =================
 
     /// <summary>بنزين المنافس مع سقف سرعة للمهارة الحالية.</summary>
     public void AiThrottle(float speedCapKmh)
     {
-        if (pcc == null) return;
-        SetCoasting(false);
-        pcc.maxSpeed = Mathf.Max(8, Mathf.RoundToInt(Mathf.Min(speedCapKmh, Mathf.Max(maxSpeedKmh, 10f))));
-        pcc.GoForward();
+        aiInput.Brake = 0f;
+        aiInput.Throttle = 1f;
+        if (mc != null)
+            mc.ExternalSpeedCapKph = Mathf.Max(8f, speedCapKmh);
     }
 
     /// <summary>فرملة المنافس (استباقية قبل المنعطفات).</summary>
     public void AiBrake()
     {
-        if (pcc == null) return;
-        SetCoasting(false);
-        pcc.ThrottleOff();
-        pcc.Brakes();
+        aiInput.Throttle = 0f;
+        aiInput.Brake = 1f;
     }
 
-    /// <summary>رجوع المنافس (إنقاذ العلوق).</summary>
+    /// <summary>رجوع المنافس (إنقاذ العلوق) — الفرامل المستمرة عند التوقف = رجوع في MotionCore.</summary>
     public void AiReverse()
     {
-        if (pcc == null) return;
-        SetCoasting(false);
-        pcc.GoReverse();
+        aiInput.Throttle = 0f;
+        aiInput.Brake = 1f;
     }
 
-    /// <summary>حياد المنافس (خارج السباق): تدحرج طبيعي حتى التوقف.</summary>
+    /// <summary>حياد المنافس (خارج السباق): تدحرج طبيعي حتى التوقف (فرملة الخمول).</summary>
     public void AiNeutral()
     {
-        SetCoasting(true);
+        aiInput.Throttle = 0f;
+        aiInput.Brake = 0f;
+        if (mc != null) mc.ExternalSpeedCapKph = 0f;
     }
 
-    /// <summary>توجيه المنافس: -1 يسار، +1 يمين، 0 استقامة (زاوية كاملة — الدقة من منطق الهدف).</summary>
+    /// <summary>توجيه المنافس: -1 يسار، +1 يمين، 0 استقامة (الأساس يوزّن الزاوية بالسرعة).</summary>
     public void AiSteer(int dir)
     {
-        if (pcc == null) return;
-        pcc.maxSteeringAngle = Mathf.RoundToInt(baseSteerAngle);
-        if (dir < 0) pcc.TurnLeft();
-        else if (dir > 0) pcc.TurnRight();
-        else pcc.ResetSteeringAngle();
+        aiInput.Steer = Mathf.Clamp(dir, -1f, 1f);
     }
 
     public void SetGripOverride(float multiplier)
     {
         gripOverride = Mathf.Clamp(multiplier, 0.1f, 2f);
-        ApplyGrip();
-    }
-
-    void ApplyGrip()
-    {
-        // تماسك WheelColliders الجانبي: نقص العشب يُطبَّق على عجلة القيادة الفيزيائية نفسها
-        for (int i = 0; i < 4; i++)
-        {
-            if (wheels[i] == null) continue;
-            WheelFrictionCurve f = wheels[i].sidewaysFriction;
-            f.stiffness = baseSidewaysStiffness * gripOverride;
-            wheels[i].sidewaysFriction = f;
-        }
+        if (mcSurface != null) mcSurface.GripOverride = gripOverride;
     }
 
     /// <summary>

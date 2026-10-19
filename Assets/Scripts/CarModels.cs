@@ -21,37 +21,68 @@ public static class CarModels
         public string name;
         public string tag;        // الأصل الملهم من Asset Store
         public int bodyType;      // 0..4 شكل الهيكل (-1 = النموذج الأصلي)
+        public int packIndex;     // v1.5.0: 0..7 = سيارة حقيقية من Racing Cars Pack 1 (-1 = إجرائية)
         public Color paint;       // الطلاء الافتراضي (اللاعب يغيّره من الإعدادات)
         public Color accent;      // لون التمييز (خطوط/جناح/عناصر)
         public float topSpeed;    // كم/س (قبل معامل الضبط STOCK/SPORT/TURBO)
-        public int accel;         // معامل عزم Prometeo 1..10
+        public int accel;         // معامل عزم المحرك (يحوَّل إلى نيوتن.متر في MotionCore)
         public float steerAngle;  // أقصى زاوية توجيه
         public int brakeForce;
     }
 
+    /// <summary>معامل تحويل أرقام المواصفات الأركيد إلى سرعات فيزياء MotionCore الحقيقية.</summary>
+    public const float MotionCoreSpeedScale = 2.6f;
+
     public static readonly CarSpec[] All =
     {
-        new CarSpec { id = 0, name = "ARCADE GT",   tag = "ARCADE FREE RACING CAR", bodyType = -1,
+        // ============ v1.5.0: سيارات Racing Cars Pack 1 الحقيقية (8) ============
+        new CarSpec { id = 0,  name = "RCP RED",     tag = "RACING CARS PACK 1 #1", packIndex = 0, bodyType = -1,
+            paint = new Color(1f, 1f, 1f), accent = new Color(1f, 0.72f, 0.15f),
+            topSpeed = 88f, accel = 10, steerAngle = 36f, brakeForce = 560 },
+        new CarSpec { id = 1,  name = "RCP BLUE",    tag = "RACING CARS PACK 1 #2", packIndex = 1, bodyType = -1,
+            paint = new Color(1f, 1f, 1f), accent = new Color(0.20f, 0.45f, 0.90f),
+            topSpeed = 87f, accel = 10, steerAngle = 36f, brakeForce = 550 },
+        new CarSpec { id = 2,  name = "RCP GREEN",   tag = "RACING CARS PACK 1 #3", packIndex = 2, bodyType = -1,
+            paint = new Color(1f, 1f, 1f), accent = new Color(0.20f, 0.72f, 0.35f),
+            topSpeed = 86f, accel = 9,  steerAngle = 37f, brakeForce = 545 },
+        new CarSpec { id = 3,  name = "RCP GOLD",    tag = "RACING CARS PACK 1 #4", packIndex = 3, bodyType = -1,
+            paint = new Color(1f, 1f, 1f), accent = new Color(0.95f, 0.78f, 0.20f),
+            topSpeed = 89f, accel = 10, steerAngle = 35f, brakeForce = 560 },
+        new CarSpec { id = 4,  name = "RCP ORANGE",  tag = "RACING CARS PACK 1 #5", packIndex = 4, bodyType = -1,
+            paint = new Color(1f, 1f, 1f), accent = new Color(0.95f, 0.50f, 0.15f),
+            topSpeed = 88f, accel = 10, steerAngle = 36f, brakeForce = 550 },
+        new CarSpec { id = 5,  name = "RCP PURPLE",  tag = "RACING CARS PACK 1 #6", packIndex = 5, bodyType = -1,
+            paint = new Color(1f, 1f, 1f), accent = new Color(0.60f, 0.30f, 0.85f),
+            topSpeed = 87f, accel = 9,  steerAngle = 37f, brakeForce = 545 },
+        new CarSpec { id = 6,  name = "RCP CYAN",    tag = "RACING CARS PACK 1 #7", packIndex = 6, bodyType = -1,
+            paint = new Color(1f, 1f, 1f), accent = new Color(0.15f, 0.70f, 0.70f),
+            topSpeed = 90f, accel = 10, steerAngle = 36f, brakeForce = 565 },
+        new CarSpec { id = 7,  name = "RCP WHITE",   tag = "RACING CARS PACK 1 #8", packIndex = 7, bodyType = -1,
+            paint = new Color(1f, 1f, 1f), accent = new Color(0.92f, 0.92f, 0.94f),
+            topSpeed = 89f, accel = 10, steerAngle = 35f, brakeForce = 555 },
+
+        // ============ سيارات الكراج الإجرائية (v1.4.0) ============
+        new CarSpec { id = 8,  name = "ARCADE GT",   tag = "ARCADE FREE RACING CAR", packIndex = -1, bodyType = -1,
             paint = new Color(0.85f, 0.20f, 0.20f), accent = new Color(1f, 0.72f, 0.15f),
             topSpeed = 75f, accel = 9,  steerAngle = 36f, brakeForce = 540 },
 
-        new CarSpec { id = 1, name = "GT-5 SPORT",  tag = "SPORT CAR FREE 5", bodyType = 0,
+        new CarSpec { id = 9,  name = "GT-5 SPORT",  tag = "SPORT CAR FREE 5", packIndex = -1, bodyType = 0,
             paint = new Color(0.86f, 0.12f, 0.16f), accent = new Color(0.94f, 0.94f, 0.92f),
             topSpeed = 84f, accel = 10, steerAngle = 38f, brakeForce = 560 },
 
-        new CarSpec { id = 2, name = "MUSCLE RS-4", tag = "SPORT CAR FREE 4", bodyType = 1,
+        new CarSpec { id = 10, name = "MUSCLE RS-4", tag = "SPORT CAR FREE 4", packIndex = -1, bodyType = 1,
             paint = new Color(0.16f, 0.36f, 0.86f), accent = new Color(0.95f, 0.78f, 0.20f),
             topSpeed = 86f, accel = 9,  steerAngle = 34f, brakeForce = 540 },
 
-        new CarSpec { id = 3, name = "FORMULA T",   tag = "RACE CAR PACKAGE", bodyType = 2,
+        new CarSpec { id = 11, name = "FORMULA T",   tag = "RACE CAR PACKAGE", packIndex = -1, bodyType = 2,
             paint = new Color(0.95f, 0.45f, 0.12f), accent = new Color(0.94f, 0.94f, 0.92f),
             topSpeed = 88f, accel = 10, steerAngle = 40f, brakeForce = 520 },
 
-        new CarSpec { id = 4, name = "MINI EVO",    tag = "LOW POLY VEHICLE PACK", bodyType = 3,
+        new CarSpec { id = 12, name = "MINI EVO",    tag = "LOW POLY VEHICLE PACK", packIndex = -1, bodyType = 3,
             paint = new Color(0.20f, 0.72f, 0.35f), accent = new Color(0.10f, 0.10f, 0.11f),
             topSpeed = 78f, accel = 9,  steerAngle = 42f, brakeForce = 560 },
 
-        new CarSpec { id = 5, name = "PICKUP 4X4",  tag = "LOW POLY VEHICLE PACK", bodyType = 4,
+        new CarSpec { id = 13, name = "PICKUP 4X4",  tag = "LOW POLY VEHICLE PACK", packIndex = -1, bodyType = 4,
             paint = new Color(0.95f, 0.78f, 0.20f), accent = new Color(0.12f, 0.12f, 0.13f),
             topSpeed = 76f, accel = 8,  steerAngle = 34f, brakeForce = 580 },
     };
@@ -77,6 +108,154 @@ public static class CarModels
     };
 
     public static Handles Build(Transform parent, CarSpec spec)
+    {
+        // v1.5.0: سيارة حقيقية من Racing Cars Pack 1 (نموذج FBX + نسيج الناشر)
+        if (spec.packIndex >= 0)
+        {
+            Handles real = TryBuildPackCar(parent, spec);
+            if (real.Root != null) return real;
+            // الأصل غائب (بيئة تطوير بلا مستودع الأصول): نشترط السقوط للإجرائي
+        }
+
+        return BuildProcedural(parent, spec);
+    }
+
+    /// <summary>بناء سيارة حقيقية من Racing Cars Pack 1 (v1.5.0): FBX + النسيج الأصلي
+    /// + تطبيع المقاس (4.5م) والاتجاه (الأمام +Z) وتوسيط مراكز العجلات على عقد.</summary>
+    static Handles TryBuildPackCar(Transform parent, CarSpec spec)
+    {
+        Handles h = new Handles();
+        h.Wheels = new Transform[4];
+
+        GameObject prefab = Resources.Load<GameObject>($"GameAssets/RacingCarsPack1/Car{spec.packIndex + 1}");
+        if (prefab == null) return h;
+
+        GameObject go = Object.Instantiate(prefab, parent);
+        go.name = "CarModel_" + spec.name;
+        go.transform.localPosition = Vector3.zero;
+        go.transform.localRotation = Quaternion.identity;
+        h.Root = go.transform;
+
+        // اتجاه السيارة: عجلات الأمام يجب أن تكون عند +Z — وإلا ندير النموذج 180°
+        Transform fl = FindDeep(go.transform, "Front_Left_Wheel");
+        Transform rl = FindDeep(go.transform, "Rear_Left_Wheel");
+        if (fl != null && rl != null && parent != null &&
+            parent.InverseTransformPoint(fl.position).z < parent.InverseTransformPoint(rl.position).z)
+        {
+            go.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
+        }
+
+        // نسيج السيارة الأصلي من الحزمة (خامة Standard واحدة على كل الرندررات)
+        Texture2D tex = Resources.Load<Texture2D>($"GameAssets/RacingCarsPack1/Car{spec.packIndex + 1}Texture");
+        if (tex != null)
+        {
+            Material body = new Material(Shader.Find("Standard"));
+            body.name = "CarPaint_" + spec.name;
+            body.mainTexture = tex;
+            body.color = Color.white; // لون النسيج الأصلي (التظليل من الإعدادات فوقه)
+            foreach (Renderer r in go.GetComponentsInChildren<Renderer>())
+            {
+                Material[] mats = new Material[r.sharedMaterials.Length];
+                for (int s = 0; s < mats.Length; s++) mats[s] = body;
+                r.sharedMaterials = mats;
+                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
+                r.receiveShadows = true;
+                if (r.name == "CarBody") h.Paint = r as MeshRenderer;
+            }
+            if (h.Paint == null)
+            {
+                Renderer first = go.GetComponentInChildren<Renderer>();
+                if (first != null) h.Paint = first as MeshRenderer;
+            }
+        }
+
+        // تطبيع المقاس: طول مستهدف 4.5 متراً
+        Bounds b = BoundsOf(go.transform);
+        float length = Mathf.Max(b.size.x, b.size.z);
+        if (length > 0.01f)
+        {
+            float s = 4.5f / length;
+            go.transform.localScale = new Vector3(s, s, s);
+        }
+
+        // محاذاة مراكز العجلات: عقد العجلات في هذه الحزمة عند حافة العجلة العليا
+        CenterWheelMeshes(go.transform);
+
+        // رفع النموذج حتى تلمس العجلات الأرض (y=0)
+        b = BoundsOf(go.transform);
+        go.transform.localPosition += new Vector3(0f, -b.min.y, 0f);
+
+        h.Wheels[0] = FindDeep(go.transform, "Front_Left_Wheel");
+        h.Wheels[1] = FindDeep(go.transform, "Front_Right_Wheel");
+        h.Wheels[2] = FindDeep(go.transform, "Rear_Left_Wheel");
+        h.Wheels[3] = FindDeep(go.transform, "Rear_Right_Wheel");
+        return h;
+    }
+
+    static void CenterWheelMeshes(Transform model)
+    {
+        string[] wheelNames = { "Front_Left_Wheel", "Front_Right_Wheel", "Rear_Left_Wheel", "Rear_Right_Wheel" };
+        foreach (string wn in wheelNames)
+        {
+            Transform node = FindDeep(model, wn);
+            if (node == null) continue;
+
+            Renderer r = node.GetComponentInChildren<Renderer>();
+            if (r == null) continue;
+
+            Vector3 localCenter = node.InverseTransformPoint(r.bounds.center);
+
+            if (r.transform == node)
+            {
+                GameObject meshGo = new GameObject("Mesh");
+                meshGo.transform.SetParent(node, false);
+                MeshFilter mf = node.GetComponent<MeshFilter>();
+                MeshRenderer mr = node.GetComponent<MeshRenderer>();
+                if (mf != null)
+                {
+                    meshGo.AddComponent<MeshFilter>().sharedMesh = mf.sharedMesh;
+                    Object.Destroy(mf);
+                }
+                if (mr != null)
+                {
+                    MeshRenderer newMr = meshGo.AddComponent<MeshRenderer>();
+                    newMr.sharedMaterials = mr.sharedMaterials;
+                    newMr.shadowCastingMode = mr.shadowCastingMode;
+                    Object.Destroy(mr);
+                }
+                meshGo.transform.localPosition = -localCenter;
+            }
+            else
+            {
+                r.transform.localPosition -= localCenter;
+            }
+        }
+    }
+
+    static Bounds BoundsOf(Transform t)
+    {
+        Bounds b = new Bounds(t.position, Vector3.zero);
+        bool any = false;
+        foreach (Renderer r in t.GetComponentsInChildren<Renderer>())
+        {
+            if (!any) { b = r.bounds; any = true; }
+            else b.Encapsulate(r.bounds);
+        }
+        return b;
+    }
+
+    static Transform FindDeep(Transform parent, string name)
+    {
+        if (parent.name == name) return parent;
+        for (int i = 0; i < parent.childCount; i++)
+        {
+            Transform r = FindDeep(parent.GetChild(i), name);
+            if (r != null) return r;
+        }
+        return null;
+    }
+
+    static Handles BuildProcedural(Transform parent, CarSpec spec)
     {
         Handles h = new Handles();
         h.Wheels = new Transform[4];

@@ -1,16 +1,17 @@
 using UnityEngine;
 
 /// <summary>
-/// TurboRacing - المرحلة 5 (v0.7.0)
-/// مدير الصوت المركزي: كل الأصوات مولّدة إجرائياً عبر AudioSynth.
-/// - حلقة محرك دائمة يتغير طبقها وعلوّها مع السرعة بثلاث حالات:
-///   Silent (قائمة/إيقاف/نهاية) ← Idle (خمول أثناء العد التنازلي) ← Drive (قيادة)
-/// - حلقات مصاحبة في وضع القيادة: صرير الفرامل عند السرعة + حفيف العشب
-///   (ملاحظة: AudioSource لا يتأثر بـ Time.timeScale لذا الإيقاف المؤقت
-///    يمر عبر EngineSilent() صراحة من RaceFlow)
-/// - مؤثرات لحظية عبر مصدرين متناوبين (يسمححان بتداخل النغمات):
-///   تنبيهات العد + GO + رنة لفة + رنة رقم قياسي + فانفار نهاية
-///   + ارتطام تصادم متدرج القوة + نقرة أزرار الواجهة
+/// TurboRacing - المرحلة 5 (v0.7.0) — مطوّر v1.3.0 (أصوات محرك حقيقية من الأصل المطلوب)
+/// مدير الصوت المركزي: المؤثرات مولّدة إجرائياً عبر AudioSynth، والمحرك الحقيقي
+/// من الأصل المطلوب "Car and transportation sounds collection" (تسجيلات 2CV6):
+/// - Ignition عند بدء العد التنازلي (تشغيل المحرك)
+/// - EngineWarming حلقة خمول أثناء العد
+/// - FirstGear/SecondGear/ThirdGear حلقات قيادة حقيقية تتبدل مع السرعة
+///   (تبديل الحلقة = إحساس تغيير الترس) مع طبقة ترتفع داخل كل ترس
+/// - احتياطي كامل: إذا غابت المقاطع يعمل المولّد الإجرائي القديم كما هو
+/// - حلقات مصاحبة: صرير الفرامل عند السرعة + حفيف العشب (إجرائية)
+/// - مؤثرات لحظية: تنبيهات العد + GO + رنة لفة + رقم قياسي + فانفار
+///   + ارتطام تصادم + نقرة أزرار (إجرائية كما هي)
 /// </summary>
 public class SoundManager : MonoBehaviour
 {
@@ -27,6 +28,11 @@ public class SoundManager : MonoBehaviour
     int sfxToggle;
 
     AudioClip beepClip, goClip, lapClip, recordClip, finishClip, crashClip, clickClip;
+
+    // --- أصوات المحرك الحقيقية (v1.3.0) ---
+    AudioClip realIgnition, realIdle, realGear1, realGear2, realGear3;
+    bool realEngine;
+    int currentGear; // 0 = خمول، 1..3 = ترس
 
     CarController car;       // قراءة دورية للسرعة/الفرامل
     SurfaceChecker surface;  // حالة العشب
@@ -54,6 +60,20 @@ public class SoundManager : MonoBehaviour
         grassSrc  = MakeSource(AudioSynth.GrassLoop(),  loop: true);
         sfxA = MakeSource(null, loop: false);
         sfxB = MakeSource(null, loop: false);
+
+        // --- محاولة تحميل أصوات المحرك الحقيقية (الأصل المطلوب) ---
+        realIgnition   = Resources.Load<AudioClip>("GameAssets/Sounds/2CV6Ignition");
+        realIdle       = Resources.Load<AudioClip>("GameAssets/Sounds/2CV6EngineWarming");
+        realGear1      = Resources.Load<AudioClip>("GameAssets/Sounds/2CV6FirstGear");
+        realGear2      = Resources.Load<AudioClip>("GameAssets/Sounds/2CV6SecondGear");
+        realGear3      = Resources.Load<AudioClip>("GameAssets/Sounds/2CV6ThirdGear");
+        realEngine = realIdle != null && realGear1 != null && realGear2 != null && realGear3 != null;
+
+        if (realEngine)
+        {
+            engineSrc.clip = realIdle;
+            Debug.Log("[SoundManager] أصوات المحرك الحقيقية (2CV6) جاهزة.");
+        }
     }
 
     void Start()
@@ -108,18 +128,56 @@ public class SoundManager : MonoBehaviour
         // ================= خمول: أثناء العد التنازلي =================
         if (mode == EngineMode.Idle)
         {
-            Fade(engineSrc, 0.13f * masterVol * engineVol);
-            engineSrc.pitch = Mathf.Lerp(engineSrc.pitch, 0.8f, 0.1f);
+            currentGear = 0;
+            if (realEngine)
+            {
+                if (engineSrc.clip != realIdle)
+                {
+                    engineSrc.clip = realIdle;
+                    engineSrc.pitch = 1f;
+                    engineSrc.Play();
+                }
+                Fade(engineSrc, 0.30f * masterVol * engineVol);
+                engineSrc.pitch = Mathf.Lerp(engineSrc.pitch, 1.05f, 0.06f);
+            }
+            else
+            {
+                Fade(engineSrc, 0.13f * masterVol * engineVol);
+                engineSrc.pitch = Mathf.Lerp(engineSrc.pitch, 0.8f, 0.1f);
+            }
             Fade(skidSrc, 0f);
             Fade(grassSrc, 0f);
             return;
         }
 
         // ================= قيادة: قراءة حالة السيارة كل إطار =================
-        // طبق المحرك: 0.85x خمول متحرك ← 2.1x عند السرعة القصوى (يخفت قليلاً على العشب)
-        float targetPitch = Mathf.Lerp(0.85f, 2.1f, speed01) * (grassNow ? 0.9f : 1f);
-        engineSrc.pitch = Mathf.Lerp(engineSrc.pitch, targetPitch, 0.08f);
-        Fade(engineSrc, (0.14f + 0.13f * speed01) * masterVol * engineVol);
+        if (realEngine)
+        {
+            // ترس حسب السرعة: تبديل الحلقة = إحساس تغيير الترس
+            int gear = speed01 < 0.33f ? 1 : (speed01 < 0.66f ? 2 : 3);
+            if (gear != currentGear || !engineSrc.isPlaying)
+            {
+                currentGear = gear;
+                engineSrc.clip = gear == 1 ? realGear1 : (gear == 2 ? realGear2 : realGear3);
+                engineSrc.pitch = 1f;
+                engineSrc.Play();
+            }
+
+            // طبقة داخل الترس: 0.95 عند بدايته ← 1.35 نهايته (محاكاة الدوران)
+            float gearBand = speed01 < 0.33f ? speed01 / 0.33f
+                          : speed01 < 0.66f ? (speed01 - 0.33f) / 0.33f
+                          : (speed01 - 0.66f) / 0.34f;
+            float targetPitch = Mathf.Lerp(0.95f, 1.35f, gearBand) * (grassNow ? 0.92f : 1f);
+            engineSrc.pitch = Mathf.Lerp(engineSrc.pitch, targetPitch, 0.09f);
+            Fade(engineSrc, (0.26f + 0.16f * speed01) * masterVol * engineVol);
+        }
+        else
+        {
+            // المولّد الإجرائي القديم (احتياطي)
+            float targetPitch = Mathf.Lerp(0.85f, 2.1f, speed01) * (grassNow ? 0.9f : 1f);
+            engineSrc.pitch = Mathf.Lerp(engineSrc.pitch, targetPitch, 0.08f);
+            Fade(engineSrc, (0.14f + 0.13f * speed01) * masterVol * engineVol);
+        }
 
         // صرير الفرامل: فقط أثناء فرملة فعلية بسرعة ملموسة (يهدأ مع تباطؤ السيارة)
         bool skidding = braking && speed01 > 0.22f;
@@ -139,14 +197,34 @@ public class SoundManager : MonoBehaviour
 
     // ================= حالات المحرك (تستدعيها RaceFlow) =================
 
-    /// <summary>خمول المحرك أثناء العد التنازلي.</summary>
-    public void EngineIdle() { mode = EngineMode.Idle; }
+    /// <summary>خمول المحرك أثناء العد التنازلي — مع المحرك الحقيقي: تشغيل Ignition.</summary>
+    public void EngineIdle()
+    {
+        mode = EngineMode.Idle;
+        if (realEngine && realIgnition != null)
+        {
+            // صوت تشغيل المحرك الحقيقي (يستمر عبر العد التنازلي ثم يسلّم للترس الأول)
+            AudioSource src = (sfxToggle++ & 1) == 0 ? sfxA : sfxB;
+            src.pitch = 1f;
+            src.volume = 0.5f * masterVol * engineVol;
+            src.clip = realIgnition;
+            src.Play();
+        }
+    }
 
     /// <summary>قيادة فعلية — الصوت يقرأ حالة السيارة دورياً.</summary>
-    public void EngineDrive() { mode = EngineMode.Drive; }
+    public void EngineDrive()
+    {
+        mode = EngineMode.Drive;
+        currentGear = 0; // يجبر تحديث الترس الأول على اختيار الحلقة الصحيحة
+    }
 
     /// <summary>صمت كامل (قائمة/إيقاف مؤقت/شاشة نتائج).</summary>
-    public void EngineSilent() { mode = EngineMode.Silent; }
+    public void EngineSilent()
+    {
+        mode = EngineMode.Silent;
+        currentGear = 0;
+    }
 
     // ================= المؤثرات اللحظية =================
 

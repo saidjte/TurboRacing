@@ -69,10 +69,33 @@ public class TrackBuilder : MonoBehaviour
     char[,] map;
     Material matGround, matRoad, matStart, matCurb, matPaint;
 
+    // --- v1.5.0: وضع الحلبة البيضاوية (الأصل المطلوب Cartoon Race Track - Oval) ---
+    bool usingOvalAsset;
+    const string TrackRes = "GameAssets/CartoonOvalTrack/";
+    const int TrackLayer = 10; // طبقة مصادمات الحلبة البيضاوية (أشعة العشب/المسح)
+    readonly HashSet<long> ovalRoadCells = new HashSet<long>();
+    float ovalScanStep = 2f;
+    Bounds ovalRoadBounds;
+
     void Awake()
     {
         Instance = this;
 
+        // v1.5.0: الأصل المطلوب أولاً — الحلبة البيضاوية الكرتونية الكاملة
+        if (TryBuildOvalAsset())
+        {
+            usingOvalAsset = true;
+            BuildOvalRacingLine();
+            Debug.Log($"[TrackBuilder] الحلبة البيضاوية (Cartoon Oval) جاهزة: انطلاق من {StartPosition}");
+            return;
+        }
+
+        BuildProceduralTrack();
+    }
+
+    /// <summary>المسار الإجرائي الكامل كما في v1.4.0 (احتياطي عند غياب الأصل).</summary>
+    void BuildProceduralTrack()
+    {
         map = BuildMap();
         EnsureMaterials();
 
@@ -90,7 +113,7 @@ public class TrackBuilder : MonoBehaviour
         MapHeightUnits = H * tileSize;
         MapCenter = new Vector3(MapWidthUnits * 0.5f, 0f, MapHeightUnits * 0.5f);
 
-        Debug.Log($"[TrackBuilder] الحلبة ثلاثية الأبعاد جاهزة: {W}×{H} بلاطة، انطلاق من {StartPosition}");
+        Debug.Log($"[TrackBuilder] الحلبة الإجرائية جاهزة: {W}×{H} بلاطة، انطلاق من {StartPosition}");
     }
 
     // ================= تصميم الحلبة (v1.3.0: أعرض وبلا حواجز) =================
@@ -353,6 +376,16 @@ public class TrackBuilder : MonoBehaviour
     /// <summary>هل الموضع العالمي على العشب (خارج الطريق)؟ يُستخدم لعقاب العشب.</summary>
     public bool IsGrass(Vector3 worldPos)
     {
+        // v1.5.0: وضع الحلبة البيضاوية — أشعة لأسفل على طبقة الحلبة
+        if (usingOvalAsset)
+        {
+            int mask = 1 << TrackLayer;
+            Vector3 origin = worldPos + Vector3.up * 12f;
+            if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, 40f, mask))
+                return !MotionCoreSurface.IsAsphaltCollider(hit.collider);
+            return true; // خارج العالم = عقاب
+        }
+
         if (map == null) return false;
 
         int tx = Mathf.FloorToInt(worldPos.x / tileSize);
@@ -362,6 +395,421 @@ public class TrackBuilder : MonoBehaviour
         char c = map[tx, tz];
         return c != RoadChar && c != StartChar;
     }
+
+    // ==================================================================
+    // ============ v1.5.0: الحلبة البيضاوية (الأصل المطلوب) ============
+    // ==================================================================
+
+    bool TryBuildOvalAsset()
+    {
+        GameObject terrain = Resources.Load<GameObject>(TrackRes + "oval_mod_terrain");
+        if (terrain == null) return false;
+
+        // 1) الأرضية (سطح القيادة): مصادمات شبكية مقعّرة على كل شبكة
+        GameObject terrainGo = InstantiateOvalModule("oval_mod_terrain", OvalColliderMode.Concave);
+        if (terrainGo == null) return false;
+
+        // 2) خطوط الطلاء فوق الإسفلت (بلا مصادم) + أضواء الانطلاق العالية (بلا مصادم)
+        InstantiateOvalModule("oval_mod_lines", OvalColliderMode.None);
+        InstantiateOvalModule("oval_mod_startlights", OvalColliderMode.None);
+
+        // 3) الديكور بمصادمات محدبة — منها مبنى الجراج الفعلي (GarageStage العالمي)
+        InstantiateOvalModule("oval_mod_buildings",   OvalColliderMode.Convex);
+        InstantiateOvalModule("oval_mod_seats",       OvalColliderMode.Convex);
+        InstantiateOvalModule("oval_mod_pitwall",     OvalColliderMode.Convex);
+        InstantiateOvalModule("oval_mod_lamps",       OvalColliderMode.Convex);
+        InstantiateOvalModule("oval_mod_tyres",       OvalColliderMode.Convex);
+        InstantiateOvalModule("oval_mod_banners",     OvalColliderMode.Convex);
+        InstantiateOvalModule("oval_mod_tents",       OvalColliderMode.Convex);
+        InstantiateOvalModule("oval_mod_turnsigns",   OvalColliderMode.Convex);
+        InstantiateOvalModule("oval_mod_bridges",     OvalColliderMode.Convex);
+        InstantiateOvalModule("oval_mod_blocks",      OvalColliderMode.Convex);
+
+        // بلا حواجز بطلب المستخدم: barriers/walls/trees لا تُستنسخ إطلاقاً
+
+        Physics.SyncTransforms();
+
+        // 4) أبعاد الكاميرا من حدود الأرضية الكاملة
+        Bounds tb = RenderersBounds(terrainGo.transform);
+        MapWidthUnits = Mathf.Max(60f, tb.size.x);
+        MapHeightUnits = Mathf.Max(60f, tb.size.z);
+        MapCenter = new Vector3(tb.center.x, 0f, tb.center.z);
+
+        // 5) مسح الطريق → الانطلاق + البوابات
+        if (!ScanOvalRoad(terrainGo))
+        {
+            Renderer tarmac = FindRendererBySubstring(terrainGo.transform, "TARMAC");
+            ovalRoadBounds = tarmac != null ? tarmac.bounds : new Bounds(MapCenter, new Vector3(228f, 1f, 110f));
+            StartPosition = new Vector3(ovalRoadBounds.center.x, 1.0f, ovalRoadBounds.min.z + 5f);
+            StartYaw = 0f;
+            BuildDefaultOvalGates();
+        }
+
+        return true;
+    }
+
+    GameObject InstantiateOvalModule(string name, OvalColliderMode mode)
+    {
+        GameObject prefab = Resources.Load<GameObject>(TrackRes + name);
+        if (prefab == null)
+        {
+            Debug.LogWarning($"[TrackBuilder] وحدة الحلبة '{name}' غير موجودة في الموارد");
+            return null;
+        }
+
+        GameObject go = Instantiate(prefab, Vector3.zero, Quaternion.identity, transform);
+        go.name = name;
+
+        ApplyOvalModuleMaterials(go, name);
+
+        if (mode != OvalColliderMode.None)
+        {
+            foreach (MeshFilter mf in go.GetComponentsInChildren<MeshFilter>())
+            {
+                if (mf.sharedMesh == null) continue;
+                MeshCollider col = mf.gameObject.AddComponent<MeshCollider>();
+                col.sharedMesh = mf.sharedMesh;
+                col.convex = (mode == OvalColliderMode.Convex);
+                mf.gameObject.layer = TrackLayer;
+            }
+        }
+
+        return go;
+    }
+
+    void ApplyOvalModuleMaterials(GameObject go, string moduleName)
+    {
+        EnsureOvalMaterials();
+
+        // الديكور: خامة واحدة لكل وحدة (من أسماء خامات FBX المرجعية)
+        Material whole = null;
+        switch (moduleName)
+        {
+            case "oval_mod_buildings":
+            case "oval_mod_seats":
+            case "oval_mod_lamps":
+            case "oval_mod_pitwall":
+            case "oval_mod_tents":
+            case "oval_mod_turnsigns":
+            case "oval_mod_bridges":
+            case "oval_mod_blocks":
+            case "oval_mod_startlights":
+                whole = ovalMatGarage; break;
+            case "oval_mod_banners": whole = ovalMatBanner; break;
+            case "oval_mod_tyres":   whole = ovalMatTyre;   break;
+            case "oval_mod_lines":   whole = ovalMatLine;   break;
+        }
+
+        foreach (Renderer r in go.GetComponentsInChildren<Renderer>())
+        {
+            if (whole != null)
+            {
+                Material[] mats = new Material[r.sharedMaterials.Length];
+                for (int s = 0; s < mats.Length; s++) mats[s] = whole;
+                r.sharedMaterials = mats;
+                continue;
+            }
+
+            // terrain: تصنيف كل رندر من اسمه
+            string n = r.name.ToUpperInvariant();
+            Material m;
+            if (n.Contains("TARMAC") || n.Contains("PITLANE") || n.Contains("KERB")) m = ovalMatRoad;
+            else if (n.Contains("GRASS2") || n.Contains("GRASS_2")) m = ovalMatGrass2;
+            else if (n.Contains("GRASS")) m = ovalMatGrass;
+            else if (n.Contains("GRAVEL") || n.Contains("SAND")) m = ovalMatGravel;
+            else if (n.Contains("CONCRETE") || n.Contains("UNDERGROUND") || n.Contains("ROCK")) m = ovalMatRock;
+            else m = ovalMatGrass;
+
+            Material[] all = new Material[r.sharedMaterials.Length];
+            for (int s = 0; s < all.Length; s++) all[s] = m;
+            r.sharedMaterials = all;
+        }
+    }
+
+    Material ovalMatRoad, ovalMatGrass, ovalMatGrass2, ovalMatGravel, ovalMatRock,
+             ovalMatGarage, ovalMatBanner, ovalMatTyre, ovalMatLine;
+    bool ovalMatsReady;
+
+    void EnsureOvalMaterials()
+    {
+        if (ovalMatsReady) return;
+        ovalMatsReady = true;
+
+        ovalMatRoad   = OvalTexMat("TrackMat_Road",   LoadOvalTex("road"),     0.55f);
+        ovalMatGrass  = OvalTexMat("TrackMat_Grass",  LoadOvalTex("grass_1"),  0f);
+        ovalMatGrass2 = OvalTexMat("TrackMat_Grass2", LoadOvalTex("grass_2"),  0f);
+        ovalMatGravel = OvalTexMat("TrackMat_Gravel", LoadOvalTex("gravel"),   0f);
+        ovalMatRock   = OvalTexMat("TrackMat_Rock",   LoadOvalTex("rock"),     0f);
+        ovalMatGarage = OvalTexMat("TrackMat_Garage", LoadOvalTex("garages"),  0.15f);
+        ovalMatBanner = OvalTexMat("TrackMat_Banner", LoadOvalTex("banners"),  0.2f);
+        ovalMatTyre   = OvalTexMat("TrackMat_Tyre",   LoadOvalTex("tyres"),    0f);
+
+        ovalMatLine = new Material(Shader.Find("Standard"));
+        ovalMatLine.name = "TrackMat_Line";
+        ovalMatLine.color = new Color(0.95f, 0.95f, 0.95f, 1f);
+        if (ovalMatLine.HasProperty("_EmissionColor"))
+        {
+            ovalMatLine.EnableKeyword("_EMISSION");
+            ovalMatLine.SetColor("_EmissionColor", new Color(0.55f, 0.55f, 0.55f, 1f));
+        }
+    }
+
+    Texture2D LoadOvalTex(string name) => Resources.Load<Texture2D>(TrackRes + name);
+
+    Material OvalTexMat(string name, Texture2D tex, float smooth)
+    {
+        Material m = new Material(Shader.Find("Standard"));
+        m.name = name;
+        if (tex != null) m.mainTexture = tex;
+        if (m.HasProperty("_Glossiness")) m.SetFloat("_Glossiness", smooth);
+        if (m.HasProperty("_Metallic")) m.SetFloat("_Metallic", 0f);
+        return m;
+    }
+
+    static long OvalCellKey(int ix, int iz) => ((long)ix << 32) | (uint)iz;
+
+    bool ScanOvalRoad(GameObject terrainGo)
+    {
+        // نطاق الطريق الرئيسي من رندر TARMAC_oval مباشرة
+        Renderer tarmac = FindRendererBySubstring(terrainGo.transform, "TARMAC_OVAL");
+        if (tarmac == null) return false;
+
+        ovalRoadBounds = tarmac.bounds;
+        ovalRoadBounds.Expand(3f);
+
+        ovalRoadCells.Clear();
+        int mask = 1 << TrackLayer;
+        Vector3 origin = new Vector3(0f, 30f, 0f);
+
+        for (float x = ovalRoadBounds.min.x; x <= ovalRoadBounds.max.x; x += ovalScanStep)
+        {
+            for (float z = ovalRoadBounds.min.z; z <= ovalRoadBounds.max.z; z += ovalScanStep)
+            {
+                origin.x = x; origin.z = z;
+                if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, 70f, mask))
+                {
+                    if (MotionCoreSurface.IsAsphaltCollider(hit.collider))
+                    {
+                        ovalRoadCells.Add(OvalCellKey(
+                            Mathf.FloorToInt(x / ovalScanStep),
+                            Mathf.FloorToInt(z / ovalScanStep)));
+                    }
+                }
+            }
+        }
+
+        if (ovalRoadCells.Count < 50) return false;
+
+        ComputeOvalStartPose();
+        BuildOvalGates();
+        return true;
+    }
+
+    void ComputeOvalStartPose()
+    {
+        // المستقيم الجنوبي: الخلايا في أدنى 14 متراً من الطريق
+        float southLimit = ovalRoadBounds.min.z + 14f;
+        float minCellZ = float.MaxValue, maxCellZ = float.MinValue;
+        HashSet<int> southRows = new HashSet<int>();
+
+        foreach (long key in ovalRoadCells)
+        {
+            int iz = (int)(key & 0xffffffff);
+            float z = iz * ovalScanStep;
+            if (z <= southLimit)
+            {
+                southRows.Add(iz);
+                minCellZ = Mathf.Min(minCellZ, z);
+                maxCellZ = Mathf.Max(maxCellZ, z);
+            }
+        }
+        if (southRows.Count == 0)
+        {
+            StartPosition = new Vector3(ovalRoadBounds.center.x, 1.0f, ovalRoadBounds.min.z + 5f);
+            StartYaw = 0f;
+            return;
+        }
+
+        HashSet<int> southCols = new HashSet<int>();
+        foreach (long key in ovalRoadCells)
+        {
+            int iz = (int)(key & 0xffffffff);
+            if (southRows.Contains(iz)) southCols.Add((int)(key >> 32));
+        }
+
+        List<int> cols = new List<int>(southCols);
+        cols.Sort();
+
+        int bestStart = 0, bestLen = 0, curStart = 0, curLen = 0;
+        for (int i = 0; i < cols.Count; i++)
+        {
+            if (i > 0 && cols[i] == cols[i - 1] + 1) curLen++;
+            else { curStart = i; curLen = 1; }
+            if (curLen > bestLen) { bestLen = curLen; bestStart = curStart; }
+        }
+
+        int c0 = cols[bestStart], c1 = cols[bestStart + bestLen - 1];
+        float startX = ((c0 + c1) * 0.5f + 0.5f) * ovalScanStep;
+        float startZ = (minCellZ + maxCellZ) * 0.5f + ovalScanStep * 0.5f;
+
+        // ارتفاع سطح الطريق الفعلي عند نقطة الانطلاق
+        float surfaceY = 1.0f;
+        int mask = 1 << TrackLayer;
+        if (Physics.Raycast(new Vector3(startX, 30f, startZ), Vector3.down, out RaycastHit hit, 70f, mask))
+            surfaceY = hit.point.y + 0.4f;
+
+        StartPosition = new Vector3(startX, surfaceY, startZ);
+        StartYaw = 0f; // شرقاً (+X) على المستقيم الجنوبي — سباق عكس عقارب الساعة
+    }
+
+    struct OvalSpan { public float min; public float max; public bool ok; }
+
+    OvalSpan OvalSpanOfCells(System.Func<Vector2, bool> pred, bool onX)
+    {
+        float lo = float.MaxValue, hi = float.MinValue;
+        foreach (long key in ovalRoadCells)
+        {
+            int ix = (int)(key >> 32);
+            int iz = (int)(key & 0xffffffff);
+            Vector2 c = new Vector2(ix * ovalScanStep, iz * ovalScanStep);
+            if (!pred(c)) continue;
+            float v = onX ? c.x : c.y;
+            lo = Mathf.Min(lo, v); hi = Mathf.Max(hi, v);
+        }
+
+        if (lo > hi) return new OvalSpan { ok = false };
+        return new OvalSpan { min = lo - ovalScanStep, max = hi + ovalScanStep, ok = true };
+    }
+
+    static LapGate OvalGate(int axis, float plane, OvalSpan span, int dir)
+    {
+        if (!span.ok)
+            return new LapGate { axis = axis, plane = plane, spanMin = -1e5f, spanMax = 1e5f, dir = dir };
+        return new LapGate { axis = axis, plane = plane, spanMin = span.min, spanMax = span.max, dir = dir };
+    }
+
+    void BuildOvalGates()
+    {
+        float cx = ovalRoadBounds.center.x, cz = ovalRoadBounds.center.z;
+        float hx = ovalRoadBounds.extents.x, hz = ovalRoadBounds.extents.z;
+
+        // [0] الشرق: عبور Z=cz صعوداً ضمن نطاق X للطريق الشرقي
+        OvalSpan east = OvalSpanOfCells(c => c.x > cx + hx * 0.72f && Mathf.Abs(c.y - cz) < hz * 0.18f, true);
+        // [1] الشمال: عبور X=cx غرباً ضمن نطاق Z للطريق الشمالي
+        OvalSpan north = OvalSpanOfCells(c => c.y > cz + hz * 0.72f && Mathf.Abs(c.x - cx) < hx * 0.18f, false);
+        // [2] الغرب: عبور Z=cz هبوطاً ضمن نطاق X للطريق الغربي
+        OvalSpan west = OvalSpanOfCells(c => c.x < cx - hx * 0.72f && Mathf.Abs(c.y - cz) < hz * 0.18f, true);
+        // [3] النهاية: عبور X=startX شرقاً ضمن نطاق Z للمستقيم الجنوبي
+        OvalSpan south = OvalSpanOfCells(c => c.y < cz - hz * 0.72f && Mathf.Abs(c.x - StartPosition.x) < hx * 0.18f, false);
+
+        LapGates = new[]
+        {
+            OvalGate(1, cz, east, +1),
+            OvalGate(0, cx, north, -1),
+            OvalGate(1, cz, west, -1),
+            OvalGate(0, StartPosition.x, south, +1)
+        };
+    }
+
+    void BuildDefaultOvalGates()
+    {
+        float cx = ovalRoadBounds.center.x, cz = ovalRoadBounds.center.z;
+        float hx = ovalRoadBounds.extents.x, hz = ovalRoadBounds.extents.z;
+        float rw = Mathf.Min(16f, Mathf.Min(hx, hz) * 0.25f);
+
+        LapGates = new[]
+        {
+            new LapGate { axis = 1, plane = cz,  spanMin = cx + hx - rw, spanMax = cx + hx + 2f, dir = +1 },
+            new LapGate { axis = 0, plane = cx,  spanMin = cz + hz - rw, spanMax = cz + hz + 2f, dir = -1 },
+            new LapGate { axis = 1, plane = cz,  spanMin = cx - hx - 2f, spanMax = cx - hx + rw, dir = -1 },
+            new LapGate { axis = 0, plane = StartPosition.x, spanMin = ovalRoadBounds.min.z, spanMax = ovalRoadBounds.min.z + rw, dir = +1 }
+        };
+    }
+
+    /// <summary>خط السباق البيضاوي (v1.5.0 لسيارات المنافسين): دلو زاوي حول مركز
+    /// الطريق — متوسط خلايا كل دلو = نقطة خط منتصف الطريق، مرتبة عكس عقارب
+    /// الساعة بدءاً من الانطلاق.</summary>
+    void BuildOvalRacingLine()
+    {
+        if (ovalRoadCells.Count == 0) { BuildRacingLine(); return; } // احتياطي إجرائي
+
+        float cx = ovalRoadBounds.center.x, cz = ovalRoadBounds.center.z;
+        const int Buckets = 96;
+
+        var sumX = new float[Buckets];
+        var sumZ = new float[Buckets];
+        var count = new int[Buckets];
+
+        foreach (long key in ovalRoadCells)
+        {
+            int ix = (int)(key >> 32);
+            int iz = (int)(key & 0xffffffff);
+            float x = ix * ovalScanStep, z = iz * ovalScanStep;
+
+            float ang = Mathf.Atan2(z - cz, x - cx);          // -π..π
+            float t = (ang + Mathf.PI) / (2f * Mathf.PI);     // 0..1
+            int b = Mathf.Clamp((int)(t * Buckets), 0, Buckets - 1);
+            sumX[b] += x; sumZ[b] += z; count[b]++;
+        }
+
+        // الدلاء بالترتيب عكس عقارب الساعة: الزاوية تزداد من -π إلى +π
+        // (شرقاً على الجنوب ← شمالاً على الشرق ← غرباً على الشمال ← جنوباً على الغرب)
+        var pts = new List<Vector3>(Buckets);
+        for (int b = 0; b < Buckets; b++)
+        {
+            if (count[b] == 0) continue;
+            pts.Add(new Vector3(sumX[b] / count[b], 0f, sumZ[b] / count[b]));
+        }
+
+        if (pts.Count < 12) { BuildRacingLine(); return; }
+
+        // تمهيد بسيط (متوسط جيران) لتنعيم الانتقالات بين الدلاء
+        var smooth = new List<Vector3>(pts.Count);
+        int n = pts.Count;
+        for (int i = 0; i < n; i++)
+        {
+            Vector3 a = pts[(i - 1 + n) % n];
+            Vector3 b = pts[i];
+            Vector3 c = pts[(i + 1) % n];
+            smooth.Add((a + b * 2f + c) * 0.25f);
+        }
+
+        // تدوير القائمة لتبدأ قرب نقطة الانطلاق
+        int startIdx = 0; float best = float.MaxValue;
+        for (int i = 0; i < smooth.Count; i++)
+        {
+            float dx = smooth[i].x - StartPosition.x, dz = smooth[i].z - StartPosition.z;
+            float d = dx * dx + dz * dz;
+            if (d < best) { best = d; startIdx = i; }
+        }
+
+        var rotated = new List<Vector3>(smooth.Count);
+        for (int i = 0; i < smooth.Count; i++) rotated.Add(smooth[(startIdx + i) % smooth.Count]);
+        RacingLine = rotated.ToArray();
+
+        Debug.Log($"[TrackBuilder] خط السباق البيضاوي جاهز: {RacingLine.Length} نقطة");
+    }
+
+    static Bounds RenderersBounds(Transform t)
+    {
+        Bounds b = new Bounds(t.position, Vector3.zero);
+        bool any = false;
+        foreach (Renderer r in t.GetComponentsInChildren<Renderer>())
+        {
+            if (!any) { b = r.bounds; any = true; }
+            else b.Encapsulate(r.bounds);
+        }
+        return b;
+    }
+
+    static Renderer FindRendererBySubstring(Transform root, string sub)
+    {
+        foreach (Renderer r in root.GetComponentsInChildren<Renderer>())
+            if (r.name.ToUpperInvariant().Contains(sub)) return r;
+        return null;
+    }
+
+    enum OvalColliderMode { None, Concave, Convex }
 
     // ================= المواد والنسيج الإجرائي =================
 

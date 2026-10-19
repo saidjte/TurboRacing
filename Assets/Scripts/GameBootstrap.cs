@@ -75,12 +75,12 @@ public class GameBootstrap : MonoBehaviour
         RenderSettings.fog = true;
         RenderSettings.fogMode = FogMode.Linear;
         RenderSettings.fogColor = haze;
-        RenderSettings.fogStartDistance = 55f;
-        RenderSettings.fogEndDistance = 170f;
+        RenderSettings.fogStartDistance = 90f;   // v1.5.0: مدى الحلبة البيضاوية
+        RenderSettings.fogEndDistance = 340f;
 
         // مسافة الظلال ودرجتها (موبايل)
         QualitySettings.shadows = ShadowQuality.All;
-        QualitySettings.shadowDistance = 85f;
+        QualitySettings.shadowDistance = 120f;   // v1.5.0: ظلال أب للحلبة الأكبر
         QualitySettings.shadowCascades = 1;
     }
 
@@ -237,7 +237,7 @@ public class GameBootstrap : MonoBehaviour
             cam.orthographic = false;
             cam.fieldOfView = 58f;
             cam.nearClipPlane = 0.3f;
-            cam.farClipPlane = 600f;
+            cam.farClipPlane = 900f; // v1.5.0: أفق أبعد للحلبة البيضاوية
             cam.clearFlags = CameraClearFlags.SolidColor;
             cam.backgroundColor = new Color(0.62f, 0.76f, 0.94f); // نفس لون الضباب = أفق سلس
         }

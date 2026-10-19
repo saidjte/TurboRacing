@@ -59,8 +59,8 @@ public class CameraFollow : MonoBehaviour
     private float shakeAmp;
 
     // ألوان السماء/الضباب (يضبطها GameBootstrap؛ نعدّل مدى الضباب فقط عند التبديل)
-    const float ChaseFogStart = 55f,  ChaseFogEnd = 170f;
-    const float MenuFogStart  = 160f, MenuFogEnd  = 520f;
+    const float ChaseFogStart = 90f,  ChaseFogEnd = 340f;   // v1.5.0: مدى الحلبة البيضاوية الكبيرة
+    const float MenuFogStart  = 380f, MenuFogEnd  = 850f;   // v1.5.0: تأطير الحلبة كاملة
 
     void Awake()
     {
