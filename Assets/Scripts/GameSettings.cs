@@ -23,7 +23,15 @@ public static class GameSettings
 
     // ================= السيارة =================
     public static int CarColorIndex = 0;     // فهرس في CarColors
-    public static int CarPreset     = 0;     // 0=STOCK 1=SPORT 2=TURBO
+    public static int CarPreset     = 0;     // 0=STOCK 1=SPORT 2=TURBO (معامل سرعة فوق مواصفات الموديل)
+    static int selectedCarModel;             // v1.4.0: الموديل المختار من الكراج
+
+    /// <summary>الموديل المختار من الكراج (0..CarModels.Count-1) — v1.4.0.</summary>
+    public static int SelectedCarModel
+    {
+        get { EnsureLoaded(); return Mathf.Clamp(selectedCarModel, 0, CarModels.Count - 1); }
+        set { selectedCarModel = Mathf.Clamp(value, 0, CarModels.Count - 1); }
+    }
 
     // ================= الكاميرا =================
     public static float CamZoom = 1f;        // 0.8..1.3 مسافة الكاميرا
@@ -75,6 +83,7 @@ public static class GameSettings
 
         CarColorIndex = PlayerPrefs.GetInt("tr_color", 0);
         CarPreset     = PlayerPrefs.GetInt("tr_preset", 0);
+        selectedCarModel = PlayerPrefs.GetInt("tr_model", 0);
 
         CamZoom = PlayerPrefs.GetFloat("tr_zoom", 1f);
         CamShake = PlayerPrefs.GetInt("tr_shake", 1) == 1;
@@ -92,6 +101,7 @@ public static class GameSettings
         PlayerPrefs.SetInt("tr_swap", SwapButtons ? 1 : 0);
         PlayerPrefs.SetInt("tr_color", CarColorIndex);
         PlayerPrefs.SetInt("tr_preset", CarPreset);
+        PlayerPrefs.SetInt("tr_model", selectedCarModel);
         PlayerPrefs.SetFloat("tr_zoom", CamZoom);
         PlayerPrefs.SetInt("tr_shake", CamShake ? 1 : 0);
         PlayerPrefs.Save();
@@ -128,7 +138,7 @@ public static class GameSettings
     {
         EnsureLoaded();
         CarController car = FindCar();
-        if (car != null) car.SetBodyColor(CurrentColor);
+        if (car != null) car.ApplyModelPaint(); // (v1.4.0) يحترم دهان المصنع للموديلات 1..5
     }
 
     public static void ApplyButtons()
@@ -155,6 +165,7 @@ public static class GameSettings
         SwapButtons = false;
         CarColorIndex = 0;
         CarPreset = 0;
+        selectedCarModel = 0;
         CamZoom = 1f;
         CamShake = true;
         Save();

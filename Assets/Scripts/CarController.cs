@@ -21,6 +21,9 @@ using UnityEngine.UI;
 /// - عقاب العشب عبر SetSpeedLimit (حد السرعة) + SetGripOverride (تماسك WheelColliders)
 /// - لون السيارة: اختيار أقرب دهان من دهانات ARCADE الخمسة (نسيج حقيقي كامل)
 /// - أزرار اللمس + تتبع الأصابع (v0.6.8) + أيقونات مرسومة مستقلة عن الخطوط (v1.2.0)
+/// - v1.4.0: تعدد الموديلات — الموديل يُختار من الكراج (GameSettings.SelectedCarModel)
+///   ويعاد بناؤه عند التغيير (ApplySelectedModel) + سيارات المنافسين (isAi):
+///   بلا واجهة لمسية وبأوامر قيادة عامة (AiThrottle/AiBrake/AiSteer/AiReverse)
 /// </summary>
 [RequireComponent(typeof(Rigidbody))]
 public class CarController : MonoBehaviour
@@ -51,6 +54,17 @@ public class CarController : MonoBehaviour
     private Rigidbody rb;
     private PrometeoCarController pcc;
     private readonly WheelCollider[] wheels = new WheelCollider[4]; // FL FR RL RR
+
+    // --- v1.4.0: تعدد الموديلات + سيارات المنافسين ---
+    public bool isAi;                 // سيارة منافسة: بلا أزرار لمسية وبلا صوت تصادم اللاعب
+    private int forcedModel = -1;     // موديل مفروض (سيارات الذكاء الاصطناعي)
+    private int builtModel = -1;      // الموديل المبني فعلياً (لكشف الحاجة لإعادة البناء)
+    private bool driftAttached;       // مؤثرات الانزلاق تُركّب مرة واحدة عبر إعادة البناء
+    private CarModels.CarSpec aiSpec;
+    private float aiSkill = 1f;
+    private float aiLane;
+    private ParticleSystem smokeRL, smokeRR;
+    private TrailRenderer skidRL, skidRR;
 
     // --- الضبط ---
     private float maxSpeedKmh;       // الحد الأقصى من الضبطة (كم/س)
@@ -97,11 +111,22 @@ public class CarController : MonoBehaviour
         rb.useGravity = true;
         rb.constraints = RigidbodyConstraints.None;
 
-        BuildCar();
+        // (v1.4.0) سيارات المنافسين تؤجّل البناء إلى Start: SetAi (الموديل المفروض)
+        // يُستدعى بعد AddComponent مباشرة — البناء هنا كان سيستعمل موديل اللاعب بالخطأ
+        if (!isAi) BuildCar();
     }
 
     void Start()
     {
+        // سيارات المنافسين (v1.4.0): الموديل المفروض + مواصفاته + لونه — لا واجهة لمسية
+        if (isAi)
+        {
+            BuildCar(); // forcedModel جاهز الآن (SetAi استُدعيت بعد AddComponent)
+            ApplySpec(aiSpec, aiSkill);
+            SetBodyColor(aiSpec.paint);
+            return;
+        }
+
         // ربط الأزرار اللمسية تلقائياً بالاسم
         BindHoldButton("BtnLeft",  down => holdingLeft  = down);
         BindHoldButton("BtnRight", down => holdingRight = down);
@@ -119,18 +144,38 @@ public class CarController : MonoBehaviour
         // إعدادات اللاعب: الضبط + اللون + تخطيط الأزرار
         GameSettings.EnsureLoaded();
         ApplyTuning(GameSettings.CarPreset, GameSettings.SteerSens);
-        SetBodyColor(GameSettings.CurrentColor);
+        ApplyModelPaint();
         DriveButtonsLayout.Apply(this);
     }
 
-    // ================= بناء السيارة (نموذج ARCADE + فيزياء Prometeo) =================
+    /// <summary>دهان السيارة وفق الإعدادات (v1.4.0): الفهرس 0 = دهان المصنع —
+    /// موديلات الكراج (1..5) تحتفظ بلونها المميز، ونموذج ARCADE يعود لأحمره الكلاسيكي.
+    /// أي لون آخر يعيد تلوين أي موديل كما في الإصدارات السابقة.</summary>
+    public void ApplyModelPaint()
+    {
+        int model = builtModel >= 0 ? builtModel : 0;
+        if (GameSettings.CarColorIndex == 0 && model != 0)
+            SetBodyColor(CarModels.Get(model).paint);
+        else
+            SetBodyColor(GameSettings.CurrentColor);
+    }
+
+    // ================= بناء السيارة (نموذج الكراج المختار + فيزياء Prometeo) =================
 
     void BuildCar()
     {
-        usingArcadeAsset = TryBuildArcadeModel(out modelRoot);
-        if (!usingArcadeAsset)
+        // v1.4.0: الموديل من الكراج (اللاعب) أو مفروض (المنافسون)
+        int model = forcedModel >= 0 ? forcedModel : GameSettings.SelectedCarModel;
+        builtModel = model;
+
+        usingArcadeAsset = model == 0 && TryBuildArcadeModel(out modelRoot);
+        if (usingArcadeAsset)
         {
-            // الاحتياطي: السيارة الإجرائية (CarModel3D) — نفس جودة اللعب بلا الأصل الخارجي
+            // نموذج ARCADE الأصلي (افتراضي اللاعب)
+        }
+        else if (model == 0)
+        {
+            // الاحتياطي: السيارة الكلاسيكية الإجرائية (CarModel3D) — نفس جودة اللعب بلا الأصل الخارجي
             CarModel3D.Handles h = CarModel3D.Build(transform);
             paintRenderer = h.Paint;
             modelRoot = h.BodyPivot != null ? h.BodyPivot.root.gameObject.transform : transform;
@@ -139,6 +184,14 @@ public class CarController : MonoBehaviour
                 for (int i = 0; i < 4 && i < h.Wheels.Length; i++)
                     wheelMeshes[i] = h.Wheels[i]; // محاور العجلات الإجرائية = مواضع العجلات
             }
+        }
+        else
+        {
+            // v1.4.0: موديلات الكراج الإجرائية (CarModels)
+            CarModels.Handles mh = CarModels.Build(transform, CarModels.Get(model));
+            paintRenderer = mh.Paint;
+            modelRoot = mh.Root;
+            for (int i = 0; i < 4; i++) wheelMeshes[i] = mh.Wheels[i];
         }
 
         FindWheelMeshes(usingArcadeAsset);
@@ -162,7 +215,8 @@ public class CarController : MonoBehaviour
         BuildWheelColliders();
 
         // متحكم Prometeo: وضع التحكم الخارجي (ندرس المدخلات ونمرر الأوامر)
-        pcc = gameObject.AddComponent<PrometeoCarController>();
+        // (v1.4.0: يُعاد استخدامه عبر إعادة بناء الموديل بدل إضافته من جديد)
+        if (pcc == null) pcc = gameObject.AddComponent<PrometeoCarController>();
         pcc.externalControl = true;
         pcc.useTouchControls = false;
         pcc.useUI = false;
@@ -180,6 +234,59 @@ public class CarController : MonoBehaviour
         pcc.bodyMassCenter = new Vector3(0f, 0.15f, 0f);
 
         AttachDriftEffects();
+
+        // إعادة ربط مراجع المؤثرات بعد أي إعادة بناء (تُبنى مرة واحدة فقط)
+        pcc.RLWParticleSystem = smokeRL;
+        pcc.RRWParticleSystem = smokeRR;
+        pcc.RLWTireSkid = skidRL;
+        pcc.RRWTireSkid = skidRR;
+    }
+
+    /// <summary>تطبيق السيارة المختارة من الكراج (v1.4.0): إعادة بناء النموذج البصري إن تغيّر.
+    /// يُستدعى قبل بدء السباق (الفيزياء مجمّدة) فلا خطر على المحاكاة.</summary>
+    public void ApplySelectedModel()
+    {
+        if (isAi) return;
+
+        int model = GameSettings.SelectedCarModel;
+        if (model == builtModel && modelRoot != null) return;
+
+        // فصل النموذج القديم كلياً (فوراً من الهرم — Destroy مؤجل — حتى لا تلوث
+        // حدودها القديمة حساب مصادم الهيكل الجديد)
+        if (modelRoot != null)
+        {
+            Transform old = modelRoot;
+            old.SetParent(null, false);
+            Destroy(old.gameObject);
+        }
+        modelRoot = null;
+        paintRenderer = null;
+        for (int i = 0; i < 4; i++) wheelMeshes[i] = null;
+
+        // عجلات السيارة الكلاسيكية الإجرائية أبناء مباشرة لجذر السيارة (لا تتبع modelRoot)
+        string[] procWheels = { "WheelFL", "WheelFR", "WheelRL", "WheelRR" };
+        foreach (string wn in procWheels)
+        {
+            Transform wt = transform.Find(wn);
+            if (wt != null)
+            {
+                wt.SetParent(null, false);
+                Destroy(wt.gameObject);
+            }
+        }
+
+        // مصادمات العجلات تُعاد من مواضع النموذج الجديد
+        Transform wc = transform.Find("WheelColliders");
+        if (wc != null)
+        {
+            wc.SetParent(null, false);
+            Destroy(wc.gameObject);
+        }
+
+        BuildCar();
+        ApplyTuning(GameSettings.CarPreset, GameSettings.SteerSens);
+        ApplyModelPaint();
+        Debug.Log($"[CarController] تم تطبيق موديل الكراج: {CarModels.Get(model).name}");
     }
 
     /// <summary>تحميل نموذج ARCADE من الموارد (الأصول الخاصة) وتركيبه تحت الجذر.</summary>
@@ -368,9 +475,13 @@ public class CarController : MonoBehaviour
         return f;
     }
 
-    /// <summary>دخان الانزلاق + آثار الإطارات من حزمة Prometeo عند العجلتين الخلفيتين.</summary>
+    /// <summary>دخان الانزلاق + آثار الإطارات من حزمة Prometeo عند العجلتين الخلفيتين.
+    /// (v1.4.0: تُبنى مرة واحدة فقط — إعادة بناء الموديل لا تكررها، والمراجع تُربط من جديد)</summary>
     void AttachDriftEffects()
     {
+        if (driftAttached) return;
+        driftAttached = true;
+
         if (wheels[2] == null || wheels[3] == null) return;
 
         GameObject smoke = Resources.Load<GameObject>("GameAssets/Prometeo/Effects/TireSmoke_PS");
@@ -383,15 +494,15 @@ public class CarController : MonoBehaviour
             {
                 GameObject s = Instantiate(smoke, transform);
                 s.transform.localPosition = new Vector3(at.x, 0.15f, at.z);
-                if (i == 2) pcc.RLWParticleSystem = s.GetComponent<ParticleSystem>();
-                else        pcc.RRWParticleSystem = s.GetComponent<ParticleSystem>();
+                if (i == 2) smokeRL = s.GetComponent<ParticleSystem>();
+                else        smokeRR = s.GetComponent<ParticleSystem>();
             }
             if (skid != null)
             {
                 GameObject t = Instantiate(skid, transform);
                 t.transform.localPosition = new Vector3(at.x, 0.06f, at.z);
-                if (i == 2) pcc.RLWTireSkid = t.GetComponent<TrailRenderer>();
-                else        pcc.RRWTireSkid = t.GetComponent<TrailRenderer>();
+                if (i == 2) skidRL = t.GetComponent<TrailRenderer>();
+                else        skidRR = t.GetComponent<TrailRenderer>();
             }
         }
     }
@@ -419,6 +530,14 @@ public class CarController : MonoBehaviour
     void FixedUpdate()
     {
         if (pcc == null) return;
+
+        // (v1.4.0) سيارات المنافسين: الأوامر تصدر من AiDriver — هذه الحلقة للمؤثرات فقط
+        if (isAi)
+        {
+            UpdateDriftEffects();
+            CheckFlipRecovery();
+            return;
+        }
 
         bool frozen = (rb.constraints & RigidbodyConstraints.FreezePosition) != 0;
 
@@ -537,9 +656,12 @@ public class CarController : MonoBehaviour
         }
     }
 
-    /// <summary>مؤثر التصادم: صوت ارتطام متدرّج القوة + اهتزاز كاميرا (كما في v0.7.0).</summary>
+    /// <summary>مؤثر التصادم: صوت ارتطام متدرّج القوة + اهتزاز كاميرا (كما في v0.7.0).
+    /// (v1.4.0: سيارات المنافسين لا تُصدر صوت تصادم الواجهة)</summary>
     void OnCollisionEnter(Collision collision)
     {
+        if (isAi) return;
+
         float impact = collision.relativeVelocity.magnitude;
         if (impact < 2.5f) return;
 
@@ -749,27 +871,32 @@ public class CarController : MonoBehaviour
             pcc.maxSpeed = Mathf.RoundToInt(maxSpeedKmh);
     }
 
-    // ================= الضبط القابل للتخصيص (v0.8.0 → v1.1.0) =================
+    // ================= الضبط القابل للتخصيص (v0.8.0 → v1.4.0) =================
 
+    /// <summary>تهيئة سيارة منافس (v1.4.0): موديل + مهارة + حارة — تُستدعى قبل Start.</summary>
+    public void SetAi(CarModels.CarSpec spec, float skillMul, float lane)
+    {
+        isAi = true;
+        forcedModel = spec.id;
+        aiSpec = spec;
+        aiSkill = Mathf.Clamp(skillMul, 0.6f, 1f);
+        aiLane = Mathf.Clamp(lane, -5f, 5f);
+    }
+
+    /// <summary>
+    /// ضبط الأداء (v1.4.0): الأساس من مواصفات الموديل المختار من الكراج،
+    /// ومعامل الضبط (STOCK/SPORT/TURBO) يعمل كمُضاعِف سرعة (1.0 / 1.07 / 1.14)
+    /// — يحافظ على معنى الإعدادات القديمة مع أي موديل.
+    /// </summary>
     public void ApplyTuning(int preset, float steerSens)
     {
-        float pMax;   // كم/س
-        int   pAcc;   // معامل عزم Prometeo (1..10)
-        float pSteer; // سرعة عجلة القيادة (0.1..1)
-        float pAngle; // أقصى زاوية توجيه
+        CarModels.CarSpec spec = CarModels.Get(builtModel >= 0 ? builtModel : 0);
 
-        switch (Mathf.Clamp(preset, 0, 2))
-        {
-            case 1: // SPORT
-                pMax = 80f; pAcc = 10; pSteer = 0.65f; pAngle = 38f;
-                break;
-            case 2: // TURBO
-                pMax = 88f; pAcc = 10; pSteer = 0.72f; pAngle = 40f;
-                break;
-            default: // STOCK
-                pMax = 72f; pAcc = 9;  pSteer = 0.58f; pAngle = 36f;
-                break;
-        }
+        float trim  = preset == 1 ? 1.07f : (preset == 2 ? 1.14f : 1f);
+        float pMax  = spec.topSpeed * trim;          // كم/س
+        int   pAcc  = spec.accel;                     // معامل عزم Prometeo (1..10)
+        float pSteer = preset == 1 ? 0.65f : (preset == 2 ? 0.72f : 0.58f); // سرعة عجلة القيادة
+        float pAngle = spec.steerAngle;               // أقصى زاوية توجيه
 
         maxSpeedKmh = pMax;
         baseSteerAngle = pAngle;
@@ -781,13 +908,79 @@ public class CarController : MonoBehaviour
             pcc.accelerationMultiplier = Mathf.Clamp(pAcc, 1, 10);
             pcc.steeringSpeed = Mathf.Clamp(pSteer * Mathf.Clamp(steerSens, 0.5f, 2f), 0.1f, 1f);
             pcc.maxSteeringAngle = Mathf.RoundToInt(pAngle);
-            pcc.brakeForce = 540;
+            pcc.brakeForce = spec.brakeForce;
             pcc.decelerationMultiplier = 2;
             pcc.handbrakeDriftMultiplier = 5;
             RestoreSpeedLimit();
         }
 
         ApplyGrip();
+    }
+
+    /// <summary>ضبط سيارة منافس من مواصفات الموديل + سقف مهارة (v1.4.0).</summary>
+    public void ApplySpec(CarModels.CarSpec spec, float skillMul)
+    {
+        maxSpeedKmh = spec.topSpeed * Mathf.Clamp(skillMul, 0.6f, 1f);
+        baseSteerAngle = spec.steerAngle;
+
+        if (pcc != null)
+        {
+            pcc.maxSpeed = Mathf.Max(10, Mathf.RoundToInt(maxSpeedKmh));
+            pcc.maxReverseSpeed = 25;
+            pcc.accelerationMultiplier = Mathf.Clamp(spec.accel, 1, 10);
+            pcc.steeringSpeed = 0.55f;
+            pcc.maxSteeringAngle = Mathf.RoundToInt(spec.steerAngle);
+            pcc.brakeForce = spec.brakeForce;
+            pcc.decelerationMultiplier = 2;
+            pcc.handbrakeDriftMultiplier = 5;
+            RestoreSpeedLimit();
+        }
+
+        ApplyGrip();
+    }
+
+    // ================= أوامر قيادة سيارات المنافسين (v1.4.0) =================
+
+    /// <summary>بنزين المنافس مع سقف سرعة للمهارة الحالية.</summary>
+    public void AiThrottle(float speedCapKmh)
+    {
+        if (pcc == null) return;
+        SetCoasting(false);
+        pcc.maxSpeed = Mathf.Max(8, Mathf.RoundToInt(Mathf.Min(speedCapKmh, Mathf.Max(maxSpeedKmh, 10f))));
+        pcc.GoForward();
+    }
+
+    /// <summary>فرملة المنافس (استباقية قبل المنعطفات).</summary>
+    public void AiBrake()
+    {
+        if (pcc == null) return;
+        SetCoasting(false);
+        pcc.ThrottleOff();
+        pcc.Brakes();
+    }
+
+    /// <summary>رجوع المنافس (إنقاذ العلوق).</summary>
+    public void AiReverse()
+    {
+        if (pcc == null) return;
+        SetCoasting(false);
+        pcc.GoReverse();
+    }
+
+    /// <summary>حياد المنافس (خارج السباق): تدحرج طبيعي حتى التوقف.</summary>
+    public void AiNeutral()
+    {
+        SetCoasting(true);
+    }
+
+    /// <summary>توجيه المنافس: -1 يسار، +1 يمين، 0 استقامة (زاوية كاملة — الدقة من منطق الهدف).</summary>
+    public void AiSteer(int dir)
+    {
+        if (pcc == null) return;
+        pcc.maxSteeringAngle = Mathf.RoundToInt(baseSteerAngle);
+        if (dir < 0) pcc.TurnLeft();
+        else if (dir > 0) pcc.TurnRight();
+        else pcc.ResetSteeringAngle();
     }
 
     public void SetGripOverride(float multiplier)

@@ -49,6 +49,13 @@ public class TrackBuilder : MonoBehaviour
 
     public LapGate[] LapGates { get; private set; }
 
+    /// <summary>
+    /// خط السباق (v1.4.0): نقاط مركز الطريق على حلقة مستطيل مقوّس بالاتجاه الرسمي
+    /// (شرقاً على العلوي ← جنوباً على الأيمن ← غرباً على السفلي ← شمالاً على الأيسر).
+    /// يُستخدم لقيادة سيارات المنافسين وحساب الترتيب.
+    /// </summary>
+    public Vector3[] RacingLine { get; private set; }
+
     // --- أبعاد خريطة الحلبة بالبلاطات (v1.3.0: طريق أعرض 16م بلا حواجز) ---
     const int W = 72;    // 144 متراً عالمياً
     const int H = 44;    // 88 متراً عالمياً
@@ -76,6 +83,8 @@ public class TrackBuilder : MonoBehaviour
         BuildWorldBounds();
         ComputeStartPose();
         BuildLapGates();
+        BuildRacingLine();   // v1.4.0: مسار سيارات المنافسين
+        SpawnParkedCars();   // v1.4.0: سيارات متوقفة كديكور خارج المسار
 
         MapWidthUnits = W * tileSize;
         MapHeightUnits = H * tileSize;
@@ -167,6 +176,176 @@ public class TrackBuilder : MonoBehaviour
             new LapGate { axis = 1, plane = 44f, spanMin = 6.5f,   spanMax = 21.5f,  dir = +1 },
             new LapGate { axis = 0, plane = 74f, spanMin = 68.5f,  spanMax = 83.5f,  dir = +1 }
         };
+    }
+
+    // ================= خط السباق (v1.4.0) =================
+
+    void BuildRacingLine()
+    {
+        var pts = new List<Vector3>(192);
+
+        // حلقة مستطيل مقوّس على مراكز المستقيمات الأربعة + أقواس Bezier في الزوايا
+        const float xL = 14f, xR = 134f, zT = 76f, zB = 12f, R = 13f;
+
+        AddLine(pts, new Vector3(xL + R, 0f, zT), new Vector3(xR - R, 0f, zT), 2f);        // العلوي شرقاً (يبدأ من نهاية قوس الشمال الغربي)
+        AddArc(pts, new Vector3(xR - R, 0f, zT), new Vector3(xR, 0f, zT), new Vector3(xR, 0f, zT - R), 6);
+        AddLine(pts, new Vector3(xR, 0f, zT - R), new Vector3(xR, 0f, zB + R), 2f);       // الأيمن جنوباً
+        AddArc(pts, new Vector3(xR, 0f, zB + R), new Vector3(xR, 0f, zB), new Vector3(xR - R, 0f, zB), 6);
+        AddLine(pts, new Vector3(xR - R, 0f, zB), new Vector3(xL + R, 0f, zB), 2f);       // السفلي غرباً
+        AddArc(pts, new Vector3(xL + R, 0f, zB), new Vector3(xL, 0f, zB), new Vector3(xL, 0f, zB + R), 6);
+        AddLine(pts, new Vector3(xL, 0f, zB + R), new Vector3(xL, 0f, zT - R), 2f);       // الأيسر شمالاً
+        AddArc(pts, new Vector3(xL, 0f, zT - R), new Vector3(xL, 0f, zT), new Vector3(xL + R, 0f, zT), 6);
+        // (v1.4.0 fix) الحلقة تنغلق ذاتياً: نهاية قوس الشمال الغربي (xL+R, zT) =
+        // أول نقطة في المستقيم العلوي بعد الالتفاف — بلا جسر ولا انعكاس 180°.
+
+        // تدوير القائمة لتبدأ قرب خط البداية (69,76) — فهرس صفر = منطقة الانطلاق
+        int startIdx = 0; float best = float.MaxValue;
+        for (int i = 0; i < pts.Count; i++)
+        {
+            float d = (pts[i].x - 69f) * (pts[i].x - 69f) + (pts[i].z - 76f) * (pts[i].z - 76f);
+            if (d < best) { best = d; startIdx = i; }
+        }
+
+        var rotated = new List<Vector3>(pts.Count);
+        for (int i = 0; i < pts.Count; i++) rotated.Add(pts[(startIdx + i) % pts.Count]);
+        RacingLine = rotated.ToArray();
+
+        Debug.Log($"[TrackBuilder] خط السباق جاهز: {RacingLine.Length} نقطة");
+    }
+
+    static void AddLine(List<Vector3> pts, Vector3 from, Vector3 to, float step)
+    {
+        Vector3 seg = to - from;
+        float len = seg.magnitude;
+        int count = Mathf.Max(1, Mathf.RoundToInt(len / step));
+        for (int i = 0; i < count; i++)
+            pts.Add(from + seg * ((float)i / count));
+    }
+
+    /// <summary>قوس Bezier تربيعي (يستثني نقطة البداية المكررة مع المستقيم السابق).</summary>
+    static void AddArc(List<Vector3> pts, Vector3 a, Vector3 c, Vector3 b, int samples)
+    {
+        for (int i = 1; i <= samples; i++)
+        {
+            float t = i / (float)samples;
+            float it = 1f - t;
+            pts.Add(it * it * a + 2f * t * it * c + t * t * b);
+        }
+    }
+
+    /// <summary>أقرب نقطة على خط السباق حول فهرس مرجعي (نافذة ±14 — بلا مسح كامل).</summary>
+    public int NearestWaypoint(Vector3 pos, int hint)
+    {
+        if (RacingLine == null || RacingLine.Length == 0) return 0;
+        int n = RacingLine.Length;
+        int best = 0; float bestD = float.MaxValue;
+        int window = Mathf.Min(14, n);
+        for (int off = -window; off <= window; off++)
+        {
+            int i = ((hint + off) % n + n) % n;
+            float dx = RacingLine[i].x - pos.x, dz = RacingLine[i].z - pos.z;
+            float d = dx * dx + dz * dz;
+            if (d < bestD) { bestD = d; best = i; }
+        }
+        return best;
+    }
+
+    /// <summary>نقطة على الخط أمام فهرس بمسافة معينة مع إزاحة جانبية ثابتة (حارة المنافس).
+    /// lateral موجب = يمين اتجاه السير، سالب = يساره.</summary>
+    public Vector3 PointAlongLine(int startIdx, float dist, float lateral)
+    {
+        Vector3[] line = RacingLine;
+        int n = line.Length;
+        Vector3 pos = line[startIdx];
+        int i = startIdx;
+        float remaining = dist;
+        Vector3 dir = Vector3.forward;
+        int guard = 0;
+
+        while (remaining > 0.0001f && guard++ < 1024)
+        {
+            Vector3 next = line[(i + 1) % n];
+            Vector3 seg = next - pos; seg.y = 0f;
+            float len = seg.magnitude;
+            if (len <= 0.0001f) { i = (i + 1) % n; pos = next; continue; }
+            dir = seg / len;
+            if (remaining <= len)
+            {
+                pos = pos + dir * remaining;
+                remaining = 0f;
+                break;
+            }
+            remaining -= len;
+            pos = next;
+            i = (i + 1) % n;
+        }
+
+        Vector3 right = Vector3.Cross(Vector3.up, dir);
+        return pos + right * lateral;
+    }
+
+    /// <summary>مجموع تغيّر الاتجاه (درجات) على مسافة أمام فهرس — مؤشر انحناء المنعطفات.
+    /// المستقيمات ≈ 0، الأقواس ≈ 40°..90° بحسب المسافة المقطوعة.</summary>
+    public float LineHeadingChange(int startIdx, float dist)
+    {
+        Vector3[] line = RacingLine;
+        int n = line.Length;
+        float travelled = 0f, acc = 0f;
+        float prevAng = float.NaN;
+        int i = startIdx;
+        int guard = 0;
+
+        while (travelled < dist && guard++ < 512)
+        {
+            Vector3 seg = line[(i + 1) % n] - line[i % n]; seg.y = 0f;
+            float len = seg.magnitude;
+            if (len > 0.0001f)
+            {
+                float ang = Mathf.Atan2(seg.z, seg.x) * Mathf.Rad2Deg;
+                if (!float.IsNaN(prevAng)) acc += Mathf.Abs(Mathf.DeltaAngle(prevAng, ang));
+                prevAng = ang;
+                travelled += len;
+            }
+            i++;
+        }
+        return acc;
+    }
+
+    // ================= سيارات متوقفة كديكور (v1.4.0) =================
+
+    /// <summary>
+    /// زيادة عدد السيارات في المشهد: موديلات كاملة متوقفة خارج المسار
+    /// (موقف خلف المدرّج الشمالي + زاوية جنوبية شرقية) بمصادمات صندوقية ثابتة.
+    /// </summary>
+    void SpawnParkedCars()
+    {
+        CarModels.CarSpec[] pool =
+        {
+            CarModels.Get(1), CarModels.Get(3), CarModels.Get(4),
+            CarModels.Get(2), CarModels.Get(5),
+        };
+
+        Vector3[] spots =
+        {
+            new Vector3(62f, 0f, 93.0f),      // الموقف الشمالي خلف المدرّج
+            new Vector3(67.5f, 0f, 93.3f),
+            new Vector3(73f, 0f, 92.8f),
+            new Vector3(98f, 0f, -8.0f),      // الزاوية الجنوبية الشرقية
+            new Vector3(104f, 0f, -8.3f),
+        };
+        float[] yaws = { 270f, 270f, 270f, 90f, 90f };
+
+        for (int i = 0; i < spots.Length && i < pool.Length; i++)
+        {
+            CarModels.Handles h = CarModels.Build(transform, pool[i]);
+            h.Root.position = spots[i];
+            h.Root.rotation = Quaternion.Euler(0f, yaws[i], 0f);
+
+            // مصادم ثابت بسيط (تتصادم معه سيارات اللاعب/المنافسين)
+            BoxCollider col = h.Root.gameObject.AddComponent<BoxCollider>();
+            col.center = new Vector3(0f, 0.45f, 0f);
+            col.size = new Vector3(1.15f, 0.9f, 2.6f);
+        }
     }
 
     // ================= استعلام السطح =================
@@ -588,7 +767,8 @@ public class TrackBuilder : MonoBehaviour
         for (int i = 0; i < 8; i++)
         {
             float x = 6f + rng.Next(0, 132);
-            if (x > 40f && x < 92f) x += 50f; // إبعاد عن المدرّج الشمالي
+            if (x > 40f && x < 92f) x += 50f; // إبعاد عن المدرّج الجنوبي
+            if (x > 95f && x < 107f) x += 25f; // إبعاد عن الموقف الجنوبي الشرقي (v1.4.0)
             AddTree(acc, new Vector3(x, 0f, -4f - rng.Next(0, 7)),
                     1.0f + (float)rng.NextDouble() * 0.5f,
                     rng.NextDouble() < 0.5 ? leafA : leafB, trunk);
@@ -598,6 +778,7 @@ public class TrackBuilder : MonoBehaviour
         {
             float x = 6f + rng.Next(0, 132);
             if (x > 30f && x < 60f) x += 45f; // إبعاد عن المدرّج عند خط البداية
+            if (x > 58f && x < 78f) x += 40f; // إبعاد عن موقف السيارات المتوقفة (v1.4.0)
             AddTree(acc, new Vector3(x, 0f, 92f + rng.Next(0, 7)),
                     1.0f + (float)rng.NextDouble() * 0.5f,
                     rng.NextDouble() < 0.5 ? leafA : leafB, trunk);

@@ -43,6 +43,7 @@ public class CameraFollow : MonoBehaviour
     private Camera cam;
     private CarController targetCar;   // (v1.3.0) لتوسيع مجال الرؤية مع السرعة
     private bool inOverview;
+    private bool inGarage;             // (v1.4.0) وضع الكراج
 
     // حالة وضع المطاردة
     private Vector3 smoothPivot;
@@ -107,6 +108,7 @@ public class CameraFollow : MonoBehaviour
     public void SetOverviewMode(bool overview)
     {
         inOverview = overview;
+        inGarage = false; // أي تبديل آخر يخرج من الكراج
         if (cam == null) cam = GetComponent<Camera>();
 
         // مدى الضباب حسب الوضع (القائمة تحتاج شفافية كاملة للحلبة)
@@ -128,8 +130,38 @@ public class CameraFollow : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// (v1.4.0) وضع الكراج: كاميرا ثابتة تُطر المنصة الدوّارة في GarageStage.
+    /// الخروج منه يتم عبر SetOverviewMode (يُنادى عند العودة للقائمة).
+    /// </summary>
+    public void SetGarageMode(bool on)
+    {
+        inGarage = on;
+        if (cam == null) cam = GetComponent<Camera>();
+
+        if (on)
+        {
+            // ضباب قريب لإخفاء العالم خلف جدار الاستوديو = خلفية نظيفة
+            RenderSettings.fogStartDistance = 30f;
+            RenderSettings.fogEndDistance = 110f;
+        }
+    }
+
     void LateUpdate()
     {
+        // ================= وضع الكراج (v1.4.0): تأطير منصة العرض =================
+        if (inGarage)
+        {
+            GarageStage gs = GarageStage.Instance;
+            if (gs != null && cam != null)
+            {
+                transform.SetPositionAndRotation(gs.CameraPos,
+                    Quaternion.LookRotation((gs.CameraLook - gs.CameraPos).normalized, Vector3.up));
+                cam.fieldOfView = 42f;
+            }
+            return;
+        }
+
         // ================= وضع القائمة: منظور علوي مائل يأطر الحلبة =================
         if (inOverview)
         {

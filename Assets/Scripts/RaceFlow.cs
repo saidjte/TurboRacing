@@ -1,13 +1,14 @@
 using UnityEngine;
 
 /// <summary>
-/// TurboRacing - المرحلة 4
-/// آلة حالات السباق المركزية:
-/// Menu (القائمة + كاميرا الحلبة) ← Countdown (عد تنازلي والسيارة مجمّدة)
+/// TurboRacing - آلة حالات السباق المركزية:
+/// Menu (القائمة + كاميرا الحلبة) ← Garage (الكراج v1.4.0)
+/// ← Countdown (عد تنازلي والسيارة مجمّدة)
 /// ← Racing (سباق فعلي) ← Paused (وقفة) / Finished (شاشة النتائج).
-/// تتحكم بـ: تجميد فيزياء السيارة، إظهار/إخفاء الواجهات، وضع كاميرا القائمة، وTime.timeScale.
+/// تتحكم بـ: تجميد فيزياء السيارة، إظهار/إخفاء الواجهات، وضع كاميرا القائمة/الكراج،
+/// وTime.timeScale، وتوليد شبكة المنافسين عند كل سباق.
 /// </summary>
-public enum RaceState { Menu, Countdown, Racing, Paused, Finished }
+public enum RaceState { Menu, Garage, Countdown, Racing, Paused, Finished }
 
 public class RaceFlow : MonoBehaviour
 {
@@ -95,6 +96,14 @@ public class RaceFlow : MonoBehaviour
     public void StartRace()
     {
         Time.timeScale = 1f;
+
+        // (v1.4.0) تطبيق موديل الكراج المختار قبل الانطلاق (إعادة بناء إن تغيّر)
+        CarController carCtrl = car != null ? car.GetComponent<CarController>() : null;
+        if (carCtrl != null) carCtrl.ApplySelectedModel();
+
+        // (v1.4.0) توليد شبكة المنافسين
+        if (AiManager.Instance != null) AiManager.Instance.SpawnGrid();
+
         ResetCarToStart();
         if (LapManager.Instance != null) LapManager.Instance.ResetRace();
 
@@ -156,6 +165,32 @@ public class RaceFlow : MonoBehaviour
         EnterMenu();
     }
 
+    // ================= الكراج (v1.4.0) =================
+
+    /// <summary>فتح الكراج من القائمة الرئيسية (عرض 3D + اختيار الموديل).</summary>
+    public void EnterGarage()
+    {
+        if (State != RaceState.Menu) return;
+
+        State = RaceState.Garage;
+        if (MenuUI.Instance != null) MenuUI.Instance.SetVisible(false);
+        if (GarageUI.Instance != null) GarageUI.Instance.SetVisible(true);
+        if (CameraFollow.Instance != null) CameraFollow.Instance.SetGarageMode(true);
+        if (GarageStage.Instance != null) GarageStage.Instance.Show(GameSettings.SelectedCarModel);
+
+        if (SoundManager.Instance != null) SoundManager.Instance.EngineSilent();
+    }
+
+    /// <summary>العودة من الكراج إلى القائمة الرئيسية.</summary>
+    public void ExitGarage()
+    {
+        if (State != RaceState.Garage) return;
+
+        if (GarageUI.Instance != null) GarageUI.Instance.SetVisible(false);
+        if (CameraFollow.Instance != null) CameraFollow.Instance.SetGarageMode(false);
+        EnterMenu();
+    }
+
     /// <summary>يستدعيها LapManager عند إكمال LapsPerRace لفة صحيحة.</summary>
     public void NotifyRaceFinished()
     {
@@ -179,7 +214,13 @@ public class RaceFlow : MonoBehaviour
             else SoundManager.Instance.PlayFinish();
         }
 
-        if (ResultsUI.Instance != null) ResultsUI.Instance.Show();
+        if (ResultsUI.Instance != null)
+        {
+            // (v1.4.0) مركز اللاعب النهائي في الشبكة
+            int pos = AiManager.Instance != null ? AiManager.Instance.PlayerPosition : 1;
+            int field = AiManager.Instance != null ? AiManager.Instance.FieldSize : 1;
+            ResultsUI.Instance.Show(pos, field);
+        }
     }
 
     // ================= الحالات =================
@@ -188,6 +229,9 @@ public class RaceFlow : MonoBehaviour
     {
         State = RaceState.Menu;
         Time.timeScale = 1f;
+
+        // (v1.4.0) إزالة سيارات المنافسين عند العودة للقائمة
+        if (AiManager.Instance != null) AiManager.Instance.DespawnAll();
 
         ResetCarToStart();
         if (LapManager.Instance != null) LapManager.Instance.ResetRace();

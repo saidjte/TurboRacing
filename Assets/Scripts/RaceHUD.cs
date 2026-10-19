@@ -14,6 +14,7 @@ public class RaceHUD : MonoBehaviour
     Text timeText;
     Text bestText;
     Text lastText;
+    Text posText;
     Text countdownText;
     bool hudShown;
 
@@ -31,6 +32,11 @@ public class RaceHUD : MonoBehaviour
         lapText = UiKit.MakeText(canvasGO.transform, "LapText",
             new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(40f, -30f),
             new Vector2(500f, 90f), 64, TextAnchor.UpperLeft, Color.white, FontStyle.Bold);
+
+        // (v1.4.0) مركز اللاعب بين المنافسين P1/P5
+        posText = UiKit.MakeText(canvasGO.transform, "PosText",
+            new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(40f, -128f),
+            new Vector2(400f, 64f), 46, TextAnchor.UpperLeft, UiKit.Amber, FontStyle.Bold);
 
         timeText = UiKit.MakeText(canvasGO.transform, "TimeText",
             new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -30f),
@@ -91,6 +97,13 @@ public class RaceHUD : MonoBehaviour
 
         lapText.text = "LAP " + Mathf.Min(lm.LapsCompleted + 1, RaceFlow.LapsPerRace) +
                        "/" + RaceFlow.LapsPerRace;
+
+        // (v1.4.0) المركز الحي بين الشبكة (لاعب + منافسون)
+        if (AiManager.Instance != null && AiManager.Instance.FieldSize > 1)
+            posText.text = "P" + AiManager.Instance.PlayerPosition + "/" + AiManager.Instance.FieldSize;
+        else
+            posText.text = "";
+
         timeText.text = UiKit.FormatTime(lm.CurrentLapTime);
         bestText.text = "BEST " + UiKit.FormatTime(lm.BestLapTime);
         lastText.text = lm.LastLapTime > 0f ? "LAST " + UiKit.FormatTime(lm.LastLapTime) : "";

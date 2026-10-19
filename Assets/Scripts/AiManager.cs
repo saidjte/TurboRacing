@@ -1,0 +1,177 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// TurboRacing - v1.4.0 (زيادة عدد السيارات: شبكة انطلاق وترتيب حي)
+/// يولّد شبكة انطلاق خلف اللاعب: 4 منافسين بموديلات/mهارات/حارات مختلفة،
+/// ويحسب تقدّم كل سيارة على خط السباق لإظهار المركز (P1/P5) في الـ HUD والنتائج.
+/// التقدّم = لفات×عدد نقاط الخط + أقرب نقطة + كسر المقطع (دقة مترية كافية للترتيب).
+/// </summary>
+public class AiManager : MonoBehaviour
+{
+    public static AiManager Instance { get; private set; }
+
+    class Racer
+    {
+        public Transform t;
+        public bool isPlayer;
+        public int lastWp;
+        public int laps;
+        public float progress;
+    }
+
+    readonly List<Racer> racers = new List<Racer>();
+    readonly List<GameObject> spawnedCars = new List<GameObject>();
+
+    // مهارات المنافسين (سقف السرعة نسبةً إلى مواصفات الموديل) — الأقوى يبدأ الأقرب للاعب
+    static readonly float[] Skills = { 0.965f, 0.925f, 0.885f, 0.85f };
+    static readonly float[] Lanes  = { 2.4f, -2.4f, 3.9f, -3.9f };
+
+    public int FieldSize => racers.Count;
+
+    void Awake()
+    {
+        Instance = this;
+    }
+
+    /// <summary>توليد شبكة الانطلاق عند بدء سباق (يستدعيها RaceFlow.StartRace).</summary>
+    public void SpawnGrid()
+    {
+        DespawnAll();
+
+        TrackBuilder track = TrackBuilder.Instance;
+        if (track == null || track.RacingLine == null || track.RacingLine.Length < 10)
+        {
+            Debug.LogWarning("[AiManager] خط السباق غير جاهز — لن يوجد منافسون.");
+            return;
+        }
+
+        // اللاعب أول المتسابقين دائماً
+        GameObject player = GameObject.Find("Car");
+        if (player == null) return;
+
+        racers.Add(new Racer
+        {
+            t = player.transform,
+            isPlayer = true,
+            lastWp = track.NearestWaypoint(player.transform.position, 0),
+            laps = 0
+        });
+
+        // شبكة الانطلاق خلف اللاعب على المستقيم العلوي (اتجاه شرقاً، خط البداية x=74)
+        Vector3[] slots =
+        {
+            new Vector3(63f, 0f, 79.5f),
+            new Vector3(63f, 0f, 72.5f),
+            new Vector3(57f, 0f, 79.5f),
+            new Vector3(57f, 0f, 72.5f),
+        };
+
+        // خلط مواصفات الموديلات 1..5 واختيار أربعة (ARCADE GT تبقى حكراً على اللاعب)
+        List<int> pool = new List<int>();
+        for (int i = 1; i < CarModels.Count; i++) pool.Add(i);
+
+        var rng = new System.Random();
+        for (int i = pool.Count - 1; i > 0; i--)
+        {
+            int j = rng.Next(i + 1);
+            int tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+        }
+
+        for (int i = 0; i < slots.Length && i < pool.Count; i++)
+        {
+            CarModels.CarSpec spec = CarModels.Get(pool[i]);
+
+            GameObject go = new GameObject("AiCar_" + (i + 1));
+            go.transform.position = slots[i];
+            go.transform.rotation = Quaternion.Euler(0f, 90f, 0f); // اتجاه شرقاً مثل اللاعب
+
+            go.AddComponent<Rigidbody>();
+            BoxCollider box = go.AddComponent<BoxCollider>();
+            box.center = new Vector3(0f, 0.45f, 0.05f);
+            box.size = new Vector3(CarModel3D.ColliderWidth, CarModel3D.ColliderHeight, CarModel3D.ColliderLength);
+
+            CarController ctrl = go.AddComponent<CarController>();
+            ctrl.SetAi(spec, Skills[i], Lanes[i]);
+
+            AiDriver driver = go.AddComponent<AiDriver>();
+            driver.Init(spec, Skills[i], Lanes[i]);
+
+            spawnedCars.Add(go);
+
+            racers.Add(new Racer
+            {
+                t = go.transform,
+                isPlayer = false,
+                lastWp = track.NearestWaypoint(slots[i], 0),
+                laps = 0
+            });
+
+            Debug.Log($"[AiManager] منافس {i + 1}: {spec.name} (مهارة {Skills[i]:0.00})");
+        }
+    }
+
+    /// <summary>إزالة كل المنافسين (العودة للقائمة/بدء سباق جديد).</summary>
+    public void DespawnAll()
+    {
+        foreach (GameObject go in spawnedCars)
+            if (go != null) Destroy(go);
+        spawnedCars.Clear();
+        racers.Clear();
+    }
+
+    void FixedUpdate()
+    {
+        TrackBuilder track = TrackBuilder.Instance;
+        if (track == null || track.RacingLine == null || racers.Count == 0) return;
+
+        RaceFlow rf = RaceFlow.Instance;
+        if (rf == null) return;
+        if (rf.State != RaceState.Racing && rf.State != RaceState.Finished) return;
+
+        int n = track.RacingLine.Length;
+
+        foreach (Racer r in racers)
+        {
+            if (r.t == null) continue;
+
+            int idx = track.NearestWaypoint(r.t.position, r.lastWp);
+
+            // لفة جديدة عند العبور الأمامي عبر بداية الخط (ارتداد = خصم)
+            if (r.lastWp > n - 8 && idx < 8) r.laps++;
+            else if (r.lastWp < 8 && idx > n - 8 && r.laps > 0) r.laps--;
+            r.lastWp = idx;
+
+            // كسر المقطع لدقة ترتيب أعلى داخل نفس النقطة
+            Vector3 p0 = track.RacingLine[idx];
+            Vector3 p1 = track.RacingLine[(idx + 1) % n];
+            Vector3 seg = p1 - p0; seg.y = 0f;
+            float lenSq = Mathf.Max(0.0001f, seg.sqrMagnitude);
+            Vector3 d = r.t.position - p0; d.y = 0f;
+            float t = Mathf.Clamp01(Vector3.Dot(d, seg) / lenSq);
+
+            r.progress = r.laps * n + idx + t;
+        }
+    }
+
+    /// <summary>مركز اللاعب الحالي (1 = الصدارة، FieldSize = الأخير).</summary>
+    public int PlayerPosition
+    {
+        get
+        {
+            if (racers.Count == 0) return 1;
+
+            float playerProgress = float.MinValue;
+            foreach (Racer r in racers)
+                if (r.isPlayer) { playerProgress = r.progress; break; }
+
+            if (playerProgress <= float.MinValue + 1f) return 1;
+
+            int better = 0;
+            foreach (Racer r in racers)
+                if (!r.isPlayer && r.progress > playerProgress) better++;
+
+            return better + 1;
+        }
+    }
+}

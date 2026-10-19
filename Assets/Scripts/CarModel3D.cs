@@ -120,8 +120,8 @@ public static class CarModel3D
         return h;
     }
 
-    /// <summary>إطار داكن + جنط فضي أعرض قليلاً (يظهر من الجانبين).</summary>
-    static Mesh BuildWheelMesh()
+    /// <summary>إطار داكن + جنط فضي أعرض قليلاً (يظهر من الجانبين). (v1.4.0: عامة لمشاركتها مع CarModels)</summary>
+    public static Mesh BuildWheelMesh()
     {
         var acc = new MeshAccumulator();
         Color tire = new Color(0.06f, 0.06f, 0.07f);

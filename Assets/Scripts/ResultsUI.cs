@@ -62,8 +62,8 @@ public class ResultsUI : MonoBehaviour
             () => { if (RaceFlow.Instance != null) RaceFlow.Instance.ToMenu(); });
     }
 
-    /// <summary>يعبّئ النتائج من LapManager ثم يعرض الشاشة.</summary>
-    public void Show()
+    /// <summary>يعبّئ النتائج من LapManager ثم يعرض الشاشة (v1.4.0: مع مركز اللاعب).</summary>
+    public void Show(int playerPos = 1, int fieldSize = 1)
     {
         LapManager lm = LapManager.Instance;
         if (lm == null) return;
@@ -74,8 +74,11 @@ public class ResultsUI : MonoBehaviour
             if (t < raceBest) raceBest = t;
         if (lm.LapTimes.Count == 0) raceBest = 0f;
 
-        // قائمة اللفات - الأفضل بين قوسين وبلون مميز
+        // قائمة اللفات - الأفضل بين قوسين وبلون مميز + مركز اللاعب في الشبكة (v1.4.0)
         var sb = new System.Text.StringBuilder();
+        if (fieldSize > 1)
+            sb.AppendLine("POSITION   P" + Mathf.Clamp(playerPos, 1, fieldSize) + "/" + fieldSize + "\n");
+
         for (int i = 0; i < lm.LapTimes.Count; i++)
         {
             float t = lm.LapTimes[i];

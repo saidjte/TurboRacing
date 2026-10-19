@@ -2,9 +2,8 @@ using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// TurboRacing - المرحلة 4
-/// القائمة الرئيسية: العنوان + إحصاءات محفوظة (أفضل لفة/إجمالي اللفات)
-/// + أزرار: بدء السباق، شرح التحكم، خروج + شارة الإصدار.
+/// TurboRacing - القائمة الرئيسية (v1.4.0): العنوان + إحصاءات محفوظة
+/// + أزرار: بدء السباق، الكراج (اختيار السيارة)، شرح التحكم، إعدادات، خروج + شارة الإصدار.
 /// </summary>
 public class MenuUI : MonoBehaviour
 {
@@ -34,36 +33,42 @@ public class MenuUI : MonoBehaviour
         root = UiKit.FullRect(canvas.transform, "Root", UiKit.OverlayDark, raycast: true);
 
         UiKit.MakeText(root, "Title",
-            new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -150f), new Vector2(1700f, 180f),
-            120, TextAnchor.MiddleCenter, UiKit.Amber, FontStyle.Bold).text = "TURBO RACING";
+            new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -120f), new Vector2(1700f, 150f),
+            100, TextAnchor.MiddleCenter, UiKit.Amber, FontStyle.Bold).text = "TURBO RACING";
 
         UiKit.MakeText(root, "Subtitle",
-            new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -345f), new Vector2(1400f, 60f),
+            new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -280f), new Vector2(1400f, 60f),
             38, TextAnchor.MiddleCenter, new Color(1f, 1f, 1f, 0.75f)).text = "REAL 3D RACING";
 
         statsText = UiKit.MakeText(root, "Stats",
-            new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -430f), new Vector2(1500f, 70f),
-            44, TextAnchor.MiddleCenter, Color.white);
+            new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -360f), new Vector2(1500f, 70f),
+            42, TextAnchor.MiddleCenter, Color.white);
 
         UiKit.MakeButton(root, "BtnStart", "START RACE",
-            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -40f), new Vector2(560f, 120f),
-            UiKit.Amber, UiKit.BtnAmberText, 56,
+            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -95f), new Vector2(560f, 110f),
+            UiKit.Amber, UiKit.BtnAmberText, 52,
             () => { if (RaceFlow.Instance != null) RaceFlow.Instance.StartRace(); });
 
+        // (v1.4.0) الكراج: اختيار السيارة من 6 موديلات بعرض ثلاثي الأبعاد
+        UiKit.MakeButton(root, "BtnGarage", "GARAGE",
+            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -215f), new Vector2(560f, 92f),
+            new Color(0.85f, 0.55f, 0.10f), UiKit.BtnAmberText, 44,
+            () => { if (RaceFlow.Instance != null) RaceFlow.Instance.EnterGarage(); });
+
         UiKit.MakeButton(root, "BtnHowTo", "HOW TO PLAY",
-            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -190f), new Vector2(560f, 88f),
-            UiKit.BtnDark, UiKit.BtnLightText, 42,
+            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -318f), new Vector2(560f, 84f),
+            UiKit.BtnDark, UiKit.BtnLightText, 38,
             () => { if (howTo != null) howTo.SetActive(true); });
 
         // (v0.8.0) زر الإعدادات المتقدمة
         UiKit.MakeButton(root, "BtnSettings", "SETTINGS",
-            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -300f), new Vector2(560f, 88f),
-            UiKit.BtnDark, UiKit.BtnLightText, 42,
+            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -410f), new Vector2(560f, 84f),
+            UiKit.BtnDark, UiKit.BtnLightText, 38,
             () => { if (SettingsUI.Instance != null) SettingsUI.Instance.Show(); });
 
         UiKit.MakeButton(root, "BtnQuit", "QUIT",
-            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -410f), new Vector2(560f, 88f),
-            UiKit.BtnDark, UiKit.BtnLightText, 42,
+            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -495f), new Vector2(560f, 84f),
+            UiKit.BtnDark, UiKit.BtnLightText, 38,
             () => Application.Quit());
 
         UiKit.MakeText(root, "Version",
@@ -96,14 +101,17 @@ public class MenuUI : MonoBehaviour
             56, TextAnchor.MiddleCenter, UiKit.Amber, FontStyle.Bold).text = "HOW TO PLAY";
 
         string body =
+            "GARAGE: pick one of 6 car models - each has its own top speed,\n" +
+            "acceleration and handling (your choice is saved permanently)\n" +
+            "RIVALS: 4 AI drivers race against you - your live position (P1/P5)\n" +
+            "shows at the top left and the final position in the results\n" +
             "MANUAL DRIVE: hold GAS (big green button, bottom right) to accelerate\n" +
             "Release GAS to coast - the car slows down gently on its own\n" +
             "Hold BRK (red button) to brake; keep holding it to reverse out of tight spots\n" +
             "Steer with the two arrow buttons (bottom left)\n" +
             "Finish 3 laps on the big wide circuit to complete the race\n" +
             "Grass slows you down to 45% speed and reduces grip\n" +
-            "Checkpoints will NOT count if you cut across the grass\n" +
-            "SETTINGS: tune sound, buttons, paint and camera";
+            "Checkpoints will NOT count if you cut across the grass";
 
         UiKit.MakeText(panel, "HowBody",
             new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -110f), new Vector2(1140f, 480f),

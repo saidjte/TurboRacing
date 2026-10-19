@@ -24,14 +24,16 @@ public class GameBootstrap : MonoBehaviour
 
         CreateTrack();          // الحلبة أولاً حتى تنطلق السيارة من خط البداية
         CreateLighting();       // (v1.0.0) شمس + ظلال حقيقية + ضباب + إضاءة محيطية
+        CreateGarage();         // (v1.4.0) مسرح الكراج خارج الحلبة (عرض + اختيار الموديلات)
         CreateCar();
         CreateAudio();          // مدير الصوت الإجرائي + آثار الإطارات
         CreateCanvasAndButtons();
-        CreateHUD();            // عداد اللفات والمؤقت
-        CreateMenus();          // القائمة الرئيسية + النتائج + الإيقاف المؤقت + الإعدادات
+        CreateHUD();            // عداد اللفات والمؤقت والمركز
+        CreateMenus();          // القائمة الرئيسية + الكراج + النتائج + الإيقاف المؤقت + الإعدادات
         CreateCinematicOverlay(); // فينييت سينمائي تحت كل الواجهات
         CreateEventSystem();
         SetupCamera();
+        CreateAiManager();      // (v1.4.0) مدير المنافسين (يولّد الشبكة عند كل سباق)
         CreateRaceFlow();       // آلة حالات السباق (أخيراً حتى يجد كل شيء)
     }
 
@@ -123,6 +125,22 @@ public class GameBootstrap : MonoBehaviour
         track.AddComponent<LapManager>(); // بوابات اللفة والتوقيت والحفظ
     }
 
+    // ================= الكراج (v1.4.0) =================
+
+    void CreateGarage()
+    {
+        // مسرح عرض ثلاثي الأبعاد خارج الحلبة: منصة دوّارة + جدار + إضاءة
+        new GameObject("GarageStage").AddComponent<GarageStage>();
+    }
+
+    // ================= مدير المنافسين (v1.4.0) =================
+
+    void CreateAiManager()
+    {
+        // يولّد شبكة الانطلاق (4 منافسين) عند كل سباق ويحسب الترتيب الحي
+        new GameObject("AiManager").AddComponent<AiManager>();
+    }
+
     // ================= واجهة السباق =================
 
     void CreateHUD()
@@ -137,6 +155,7 @@ public class GameBootstrap : MonoBehaviour
     {
         new GameObject("SettingsUI").AddComponent<SettingsUI>(); // صفحة الإعدادات (ترتيب 50)
         new GameObject("MenuUI").AddComponent<MenuUI>();         // القائمة الرئيسية (ترتيب 40)
+        new GameObject("GarageUI").AddComponent<GarageUI>();     // الكراج (ترتيب 45) — v1.4.0
         new GameObject("ResultsUI").AddComponent<ResultsUI>();   // شاشة النتائج (ترتيب 30)
         new GameObject("PauseUI").AddComponent<PauseUI>();       // الإيقاف المؤقت (ترتيب 20)
     }
