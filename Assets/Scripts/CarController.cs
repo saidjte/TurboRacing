@@ -75,10 +75,8 @@ public class CarController : MonoBehaviour
     /// <summary>السرعة الحالية نسبةً إلى الحد الأقصى (0..1) — للصوت والآثار.</summary>
     public float Speed01 => maxSpeedKmh > 1f ? Mathf.Clamp01(SpeedKmh / maxSpeedKmh) : 0f;
 
-    /// <summary>خصائص للقراءة من سكربتات أخرى (الواجهة المعتمدة كما هي).
-    /// هل اللاعب يضغط على البنزين الآن؟ (مفيد للصوت/HUD)</summary>
+    /// <summary>هل اللاعب يضغط على البنزين الآن؟ (مفيد للصوت/HUD)</summary>
     public bool IsAccelerating => holdingGas;
-    public bool IsBraking => holdingBrake && ForwardSpeed() > 0.5f;
     /// <summary>مُصدِّر مادة الطلاء (يستخدمه SurfaceChecker للتلطيخ على العشب).</summary>
     public MeshRenderer PaintRenderer => paintRenderer;
 
