@@ -229,7 +229,23 @@ public class RaceFlow : MonoBehaviour
 
     void SetCarFrozen(bool frozen)
     {
-        if (carRb != null) carRb.simulated = !frozen;
+        if (carRb == null) return;
+
+        // الفضاء المجسّم: Rigidbody ثلاثي الأبعاد بلا خاصية simulated (عكس 2D) —
+        // التجميد بقصر كل القيود (موضع + دوران) وتصفير السرعات، والفك يعيد
+        // قيود الحركة المستوية التي يضبطها CarController.Awake نفسها.
+        if (frozen)
+        {
+            carRb.linearVelocity = Vector3.zero;
+            carRb.angularVelocity = Vector3.zero;
+            carRb.constraints = RigidbodyConstraints.FreezeAll;
+        }
+        else
+        {
+            carRb.constraints = RigidbodyConstraints.FreezePositionY |
+                                RigidbodyConstraints.FreezeRotationX |
+                                RigidbodyConstraints.FreezeRotationZ;
+        }
     }
 
     void SetGameCanvas(bool on)

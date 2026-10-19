@@ -58,7 +58,6 @@ public class GameBootstrap : MonoBehaviour
         sun.intensity = 1.05f;
         sun.shadows = LightShadows.Soft;
         sun.shadowStrength = 0.78f;
-        sun.shadowResolution = UnityEngine.Rendering.ShadowResolution._1024; // موبايل
         sun.shadowNormalBias = 0.06f;
         sunGO.transform.rotation = Quaternion.Euler(50f, -28f, 0f);
 
