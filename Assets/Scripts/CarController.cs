@@ -209,7 +209,7 @@ public class CarController : MonoBehaviour
             }
             r.sharedMaterials = mats;
             if (bodyT != null && r.transform == bodyT && mats.Length > 1)
-                paintRenderer = r; // مشيد الهيكل = مصدر طلاء للتلطيخ والإضاءة
+                paintRenderer = r as MeshRenderer; // مشيد الهيكل = مصدر طلاء للتلطيخ
         }
     }
 
