@@ -360,7 +360,8 @@ public class SettingsUI : MonoBehaviour
     string TopSpeedText()
     {
         int p = Mathf.Clamp(GameSettings.CarPreset, 0, 2);
-        float v = p == 1 ? 15.5f : p == 2 ? 17f : 14f;
+        // v1.3.0: متطابقة مع ApplyTuning في CarController (72/80/88 كم/س)
+        float v = p == 1 ? 22.2f : p == 2 ? 24.4f : 20f;
         return Mathf.RoundToInt(v * 3.6f) + " KM/H";
     }
 

@@ -9,6 +9,7 @@ using UnityEngine;
 /// - وضع القائمة: منظور علوي مائل يؤطر الحلبة كاملة (يُحسب من أبعاد الحلبة
 ///   ومجال الرؤية ونسبة الشاشة) — يبقى مجسّماً (ليس أورثوغرافياً)
 /// - ضبط الضباب حسب الوضع (ضباب قريب سينمائي في السباق، شبه معدوم في القائمة)
+/// - (v1.3.0) توسيع مجال الرؤية مع السرعة (+9° عند السرعة القصوى) = إحساس فيزيائي بالتسارع
 /// - اهتزاز التصادم + إعدادات اللاعب (مسافة/تعطيل) كما في v0.8.0
 /// </summary>
 public class CameraFollow : MonoBehaviour
@@ -40,6 +41,7 @@ public class CameraFollow : MonoBehaviour
 
     private Transform target;
     private Camera cam;
+    private CarController targetCar;   // (v1.3.0) لتوسيع مجال الرؤية مع السرعة
     private bool inOverview;
 
     // حالة وضع المطاردة
@@ -73,6 +75,7 @@ public class CameraFollow : MonoBehaviour
         if (car != null)
         {
             target = car.transform;
+            targetCar = car.GetComponent<CarController>();
         }
         else
         {
@@ -135,6 +138,8 @@ public class CameraFollow : MonoBehaviour
 
             if (cam != null)
             {
+                cam.fieldOfView = chaseFov; // التأطير المحسوب يعتمد المجال المرجعي
+
                 float halfV = Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
                 float aspect = Mathf.Max(0.6f, cam.aspect);
 
@@ -185,6 +190,10 @@ public class CameraFollow : MonoBehaviour
         {
             shakeAmp = 0f;
         }
+
+        // (v1.3.0) إحساس السرعة: مجال الرؤية يتسع حتى +9° تدريجياً مع اقتراب السرعة القصوى
+        if (cam != null)
+            cam.fieldOfView = chaseFov + (targetCar != null ? targetCar.Speed01 * 9f : 0f);
 
         transform.SetPositionAndRotation(pos, rot);
     }

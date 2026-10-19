@@ -4,9 +4,12 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 /// <summary>
-/// TurboRacing - v1.2.0 (محرك PROMETEO: Car Controller)
+/// TurboRacing - v1.3.0 (محرك PROMETEO: Car Controller)
 /// واجهة قيادة (facade) تُبقي واجهتنا العامة المعتمدة كما هي، وداخلها الفيزياء الحقيقية
 /// من PrometeoCarController (WheelColliders + تعليق + نقل ثقل + انزلاق):
+/// - سرعات أعلى (v1.3.0): STOCK 72 / SPORT 80 / TURBO 88 كم/س بدل 50/56/61
+///   مع فرملة أقوى ورجوع أسرع، وتوجيه يتقلّص زاويته مع السرعة لثبات أعلى
+///   (أسلوب المضامير الأركيد في مراجعات مثل Multiversal Vehicle Controller)
 /// - قيادة يدوية كاملة (v1.2.0): زر بنزين GAS للتسارع — لم تعد السيارة تتحرك من تلقاء نفسها،
 ///   وبدون ضغط تتدحرج وتتباطأ بأسلوب Prometeo الأصلي (DecelerateCar بإيقاعه المرجعي 0.1ث)
 /// - زر الفرامل: فرملة فعلية أثناء الحركة ثم رجوع بطيء عند التوقف تقريباً (أسلوب الموبايل)
@@ -51,6 +54,7 @@ public class CarController : MonoBehaviour
 
     // --- الضبط ---
     private float maxSpeedKmh;       // الحد الأقصى من الضبطة (كم/س)
+    private float baseSteerAngle = 36f; // أقصى زاوية توجيه من الضبطة (قبل تخفيض السرعة)
     private float baseSidewaysStiffness = 1f;
     private float gripOverride = 1f;
 
@@ -426,7 +430,12 @@ public class CarController : MonoBehaviour
             return;
         }
 
-        // --- التوجيه ---
+        // --- التوجيه (v1.3.0: زاوية توجيه تتقلص مع السرعة — ثبات أعلى بسرعات جديدة) ---
+        // عند التوقف كامل الزاوية للمناورة؛ وعند السرعة القصوى 60% منها فقط
+        // فلا تنقلب السيارة ولا تنزلق من حدة التوجيه، مع بقاء التماسك الجانبي المرفوع.
+        pcc.maxSteeringAngle = Mathf.RoundToInt(
+            Mathf.Lerp(baseSteerAngle, baseSteerAngle * 0.60f, Speed01));
+
         if (holdingLeft && !holdingRight) pcc.TurnLeft();
         else if (holdingRight && !holdingLeft) pcc.TurnRight();
         else pcc.ResetSteeringAngle();
@@ -752,26 +761,27 @@ public class CarController : MonoBehaviour
         switch (Mathf.Clamp(preset, 0, 2))
         {
             case 1: // SPORT
-                pMax = 56f; pAcc = 12; pSteer = 0.65f; pAngle = 38f;
+                pMax = 80f; pAcc = 10; pSteer = 0.65f; pAngle = 38f;
                 break;
             case 2: // TURBO
-                pMax = 61f; pAcc = 14; pSteer = 0.72f; pAngle = 40f;
+                pMax = 88f; pAcc = 10; pSteer = 0.72f; pAngle = 40f;
                 break;
             default: // STOCK
-                pMax = 50f; pAcc = 10; pSteer = 0.58f; pAngle = 36f;
+                pMax = 72f; pAcc = 9;  pSteer = 0.58f; pAngle = 36f;
                 break;
         }
 
         maxSpeedKmh = pMax;
+        baseSteerAngle = pAngle;
 
         if (pcc != null)
         {
             pcc.maxSpeed = Mathf.RoundToInt(pMax);
-            pcc.maxReverseSpeed = 22;
+            pcc.maxReverseSpeed = 30;
             pcc.accelerationMultiplier = Mathf.Clamp(pAcc, 1, 10);
             pcc.steeringSpeed = Mathf.Clamp(pSteer * Mathf.Clamp(steerSens, 0.5f, 2f), 0.1f, 1f);
             pcc.maxSteeringAngle = Mathf.RoundToInt(pAngle);
-            pcc.brakeForce = 450;
+            pcc.brakeForce = 540;
             pcc.decelerationMultiplier = 2;
             pcc.handbrakeDriftMultiplier = 5;
             RestoreSpeedLimit();
