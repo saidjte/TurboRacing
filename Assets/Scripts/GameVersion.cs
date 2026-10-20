@@ -22,6 +22,6 @@
 /// </summary>
 public static class GameVersion
 {
-    public const string Number = "1.9.0";
-    public const int Code = 28;
+    public const string Number = "1.9.1";
+    public const int Code = 29;
 }

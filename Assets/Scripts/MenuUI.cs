@@ -103,8 +103,8 @@ public class MenuUI : MonoBehaviour
         string body =
             "GARAGE: pick one of 6 car models - each has its own top speed,\n" +
             "acceleration and handling (your choice is saved permanently)\n" +
-            "RIVALS: 4 AI drivers race against you - your live position (P1/P5)\n" +
-            "shows at the top left and the final position in the results\n" +
+            "SOLO TEST: only YOUR car is on the circuit - no rival cars, no\n" +
+            "parked cars - so you can learn every corner without interference\n" +
             "MANUAL DRIVE: hold GAS (big green button, bottom right) to accelerate\n" +
             "Release GAS to coast - the car slows down gently on its own\n" +
             "Hold BRK (red button) to brake; keep holding it to reverse out of tight spots\n" +

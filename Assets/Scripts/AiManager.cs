@@ -11,6 +11,12 @@ public class AiManager : MonoBehaviour
 {
     public static AiManager Instance { get; private set; }
 
+    /// <summary>
+    /// (v1.9.1) Solo mode — player car ONLY, requested for debugging without
+    /// interference from rival/parked cars. Flip to false to restore rivals.
+    /// </summary>
+    public const bool SoloMode = true;
+
     class Racer
     {
         public Transform t;
@@ -57,6 +63,14 @@ public class AiManager : MonoBehaviour
             lastWp = track.NearestWaypoint(player.transform.position, 0),
             laps = 0
         });
+
+        // ===== v1.9.1: solo mode — player registered above (FieldSize=1,
+        // P1/1 automatic in HUD/results); skip spawning any rival cars. =====
+        if (SoloMode)
+        {
+            Debug.Log("[AiManager] Solo mode - player car only, no rivals spawned.");
+            return;
+        }
 
         // شبكة الانطلاق خلف اللاعب (v1.6.0): مواضع مشتقة من StartPosition/StartYaw
         // بدل إحداثيات ثابتة لحلبة قديمة — تعمل على أي حلبة (البيضاوية والإجرائية):

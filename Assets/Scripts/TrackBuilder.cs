@@ -135,7 +135,8 @@ public class TrackBuilder : MonoBehaviour
         ComputeStartPose();
         BuildLapGates();
         BuildRacingLine();   // v1.4.0: مسار سيارات المنافسين
-        SpawnParkedCars();   // v1.4.0: سيارات متوقفة كديكور خارج المسار
+        if (!AiManager.SoloMode)
+            SpawnParkedCars();   // v1.9.1: skipped in solo mode (parked cars carry BoxColliders)
 
         MapWidthUnits = W * tileSize;
         MapHeightUnits = H * tileSize;
