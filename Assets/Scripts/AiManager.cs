@@ -58,16 +58,18 @@ public class AiManager : MonoBehaviour
             laps = 0
         });
 
-        // شبكة الانطلاق خلف اللاعب على المستقيم العلوي (اتجاه شرقاً، خط البداية x=74)
-        Vector3[] slots =
-        {
-            new Vector3(63f, 0f, 79.5f),
-            new Vector3(63f, 0f, 72.5f),
-            new Vector3(57f, 0f, 79.5f),
-            new Vector3(57f, 0f, 72.5f),
-        };
+        // شبكة الانطلاق خلف اللاعب (v1.6.0): مواضع مشتقة من StartPosition/StartYaw
+        // بدل إحداثيات ثابتة لحلبة قديمة — تعمل على أي حلبة (البيضاوية والإجرائية):
+        // صفاً خلف بعض بجانبين متبادلين على عرض الطريق (±2.4م و±3.9م)
+        Vector3 startPos = track.StartPosition;
+        Quaternion startRot = Quaternion.Euler(0f, track.StartYaw, 0f);
+        Vector3 fwd = startRot * Vector3.forward;
+        Vector3 right = startRot * Vector3.right;
 
-        // خلط مواصفات الموديلات 1..5 واختيار أربعة (ARCADE GT تبقى حكراً على اللاعب)
+        float[] back  = { 7f, 7f, 13f, 13f };
+        float[] lanes = { 2.4f, -2.4f, 3.9f, -3.9f };
+
+        // خلط مواصفات الموديلات 1..N واختيار أربعة
         List<int> pool = new List<int>();
         for (int i = 1; i < CarModels.Count; i++) pool.Add(i);
 
@@ -78,13 +80,15 @@ public class AiManager : MonoBehaviour
             int tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
         }
 
-        for (int i = 0; i < slots.Length && i < pool.Count; i++)
+        for (int i = 0; i < slotsCount && i < pool.Count; i++)
         {
             CarModels.CarSpec spec = CarModels.Get(pool[i]);
 
+            Vector3 slot = startPos - fwd * back[i] + right * lanes[i];
+
             GameObject go = new GameObject("AiCar_" + (i + 1));
-            go.transform.position = slots[i];
-            go.transform.rotation = Quaternion.Euler(0f, 90f, 0f); // اتجاه شرقاً مثل اللاعب
+            go.transform.position = slot;
+            go.transform.rotation = startRot; // نفس اتجاه اللاعب
 
             go.AddComponent<Rigidbody>();
             BoxCollider box = go.AddComponent<BoxCollider>();
@@ -103,13 +107,15 @@ public class AiManager : MonoBehaviour
             {
                 t = go.transform,
                 isPlayer = false,
-                lastWp = track.NearestWaypoint(slots[i], 0),
+                lastWp = track.NearestWaypoint(slot, 0),
                 laps = 0
             });
 
             Debug.Log($"[AiManager] منافس {i + 1}: {spec.name} (مهارة {Skills[i]:0.00})");
         }
     }
+
+    const int slotsCount = 4;
 
     /// <summary>إزالة كل المنافسين (العودة للقائمة/بدء سباق جديد).</summary>
     public void DespawnAll()

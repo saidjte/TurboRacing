@@ -1,17 +1,12 @@
 using UnityEngine;
 
 /// <summary>
-/// TurboRacing - v1.4.0 (الكراج وتعدد السيارات)
-/// مكافئات إجرائية بأسلوب أصول المتجر المختارة (نمط المشهد المعتمد في المشروع —
-/// بناء Low-Poly بالكود بدل استيراد الحزم):
-/// - GT-5 SPORT   ≈ Sport Car Free 5 (360208): كوبيه منخفض بجناح خلفي كبير
-/// - MUSCLE RS-4  ≈ Sport Car Free 4 (360150): عضلية بخطوط سباق وسقيفة الشفط
-/// - FORMULA T    ≈ Race Car package (141690): عجلات مكشوفة وجناحان أمامي/خلفي
-/// - MINI EVO     ≈ Low Poly Car Vehicle Pack (259182): هاتشباك رشيقة قمرة عالية
-/// - PICKUP 4X4   ≈ Low Poly Car Vehicle Pack (259182): بيك أب بصندوق خلفي
-/// - ARCADE GT    = النموذج الأصلي (ARCADE: FREE Racing Car) يبقى الخيار الافتراضي
-/// كل موديل = مواصفات أداء (سرعة/تسارع/توجيه/فرملة) + هيكل مدموج في شبكتين
-/// (طلاء + تفاصيل) + أربع عجلات بمحاور قياسية متوافقة مع فيزياء Prometeo.
+/// TurboRacing - v1.6.0 (سيارات حقيقية فقط)
+/// الكراج = سيارات Racing Cars Pack 1 الثماني حصراً (نموذج FBX + نسيج الناشر)
+/// بطلب المستخدم: أُزيلت كل السيارات الإجرائية (ARCADE GT + الموديلات المولّدة بالكود).
+/// البناء الإجرائي يبقى احتياطياً للتطوير فقط عند غياب أصل الحزمة.
+/// كل موديل = مواصفات أداء (سرعة/تسارع/توجيه/فرملة) + تطبيع مقاس 4.5م
+/// + عجلات بمحاور قياسية متوافقة مع فيزياء MotionCore.
 /// </summary>
 public static class CarModels
 {
@@ -61,30 +56,8 @@ public static class CarModels
             paint = new Color(1f, 1f, 1f), accent = new Color(0.92f, 0.92f, 0.94f),
             topSpeed = 89f, accel = 10, steerAngle = 35f, brakeForce = 555 },
 
-        // ============ سيارات الكراج الإجرائية (v1.4.0) ============
-        new CarSpec { id = 8,  name = "ARCADE GT",   tag = "ARCADE FREE RACING CAR", packIndex = -1, bodyType = -1,
-            paint = new Color(0.85f, 0.20f, 0.20f), accent = new Color(1f, 0.72f, 0.15f),
-            topSpeed = 75f, accel = 9,  steerAngle = 36f, brakeForce = 540 },
-
-        new CarSpec { id = 9,  name = "GT-5 SPORT",  tag = "SPORT CAR FREE 5", packIndex = -1, bodyType = 0,
-            paint = new Color(0.86f, 0.12f, 0.16f), accent = new Color(0.94f, 0.94f, 0.92f),
-            topSpeed = 84f, accel = 10, steerAngle = 38f, brakeForce = 560 },
-
-        new CarSpec { id = 10, name = "MUSCLE RS-4", tag = "SPORT CAR FREE 4", packIndex = -1, bodyType = 1,
-            paint = new Color(0.16f, 0.36f, 0.86f), accent = new Color(0.95f, 0.78f, 0.20f),
-            topSpeed = 86f, accel = 9,  steerAngle = 34f, brakeForce = 540 },
-
-        new CarSpec { id = 11, name = "FORMULA T",   tag = "RACE CAR PACKAGE", packIndex = -1, bodyType = 2,
-            paint = new Color(0.95f, 0.45f, 0.12f), accent = new Color(0.94f, 0.94f, 0.92f),
-            topSpeed = 88f, accel = 10, steerAngle = 40f, brakeForce = 520 },
-
-        new CarSpec { id = 12, name = "MINI EVO",    tag = "LOW POLY VEHICLE PACK", packIndex = -1, bodyType = 3,
-            paint = new Color(0.20f, 0.72f, 0.35f), accent = new Color(0.10f, 0.10f, 0.11f),
-            topSpeed = 78f, accel = 9,  steerAngle = 42f, brakeForce = 560 },
-
-        new CarSpec { id = 13, name = "PICKUP 4X4",  tag = "LOW POLY VEHICLE PACK", packIndex = -1, bodyType = 4,
-            paint = new Color(0.95f, 0.78f, 0.20f), accent = new Color(0.12f, 0.12f, 0.13f),
-            topSpeed = 76f, accel = 8,  steerAngle = 34f, brakeForce = 580 },
+        // v1.6.0: أُزيلت السيارات الإجرائية (ARCADE GT + GT-5/MUSCLE/FORMULA/MINI/PICKUP)
+        // بطلب المستخدم — الكراج سيارات Racing Cars Pack 1 الحقيقية حصراً
     };
 
     public static int Count => All.Length;
@@ -181,9 +154,16 @@ public static class CarModels
         // محاذاة مراكز العجلات: عقد العجلات في هذه الحزمة عند حافة العجلة العليا
         CenterWheelMeshes(go.transform);
 
-        // رفع النموذج حتى تلمس العجلات الأرض (y=0)
+        // v1.6.0 (إصلاح الغرق): رفع النموذج حتى تلمس العجلات أرض **جذر السيارة**
+        // (المحلي y=0) لا أرض العالم! التثبيت العالمي على y=0 كان يغرق السيارات
+        // المستوردة تحت سطح حلبة Cartoon Oval (سطحها أعلى من صفر العالم) فتفقد
+        // العجلات تماسها → لا بنزين ولا توجيه (التحكم=0) والهيكل غارق في الأرض.
         b = BoundsOf(go.transform);
-        go.transform.localPosition += new Vector3(0f, -b.min.y, 0f);
+        Vector3 bottomWorld = new Vector3(go.transform.position.x, b.min.y, go.transform.position.z);
+        float localBottom = parent != null
+            ? parent.InverseTransformPoint(bottomWorld).y
+            : b.min.y;
+        go.transform.localPosition += new Vector3(0f, -localBottom, 0f);
 
         h.Wheels[0] = FindDeep(go.transform, "Front_Left_Wheel");
         h.Wheels[1] = FindDeep(go.transform, "Front_Right_Wheel");

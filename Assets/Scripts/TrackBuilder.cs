@@ -337,8 +337,10 @@ public class TrackBuilder : MonoBehaviour
     // ================= سيارات متوقفة كديكور (v1.4.0) =================
 
     /// <summary>
-    /// زيادة عدد السيارات في المشهد: موديلات كاملة متوقفة خارج المسار
-    /// (موقف خلف المدرّج الشمالي + زاوية جنوبية شرقية) بمصادمات صندوقية ثابتة.
+    /// زيادة عدد السيارات في المشهد: موديلات كاملة متوقفة خارج المسار بجانب
+    /// مستقيم الانطلاق. v1.6.0: المواضع مشتقة من StartPosition/StartYaw بدل
+    /// إحداثيات الحلبة القديمة الثابتة (كانت تقع داخل تضاريس/مباني البيضاوية)
+    /// + فحص عشب (خارج الطريق) + ارتفاع الأرض بالأشعة فتجلس على السطح لا على صفر العالم.
     /// </summary>
     void SpawnParkedCars()
     {
@@ -348,27 +350,60 @@ public class TrackBuilder : MonoBehaviour
             CarModels.Get(2), CarModels.Get(5),
         };
 
-        Vector3[] spots =
-        {
-            new Vector3(62f, 0f, 93.0f),      // الموقف الشمالي خلف المدرّج
-            new Vector3(67.5f, 0f, 93.3f),
-            new Vector3(73f, 0f, 92.8f),
-            new Vector3(98f, 0f, -8.0f),      // الزاوية الجنوبية الشرقية
-            new Vector3(104f, 0f, -8.3f),
-        };
-        float[] yaws = { 270f, 270f, 270f, 90f, 90f };
+        Quaternion rot = Quaternion.Euler(0f, StartYaw, 0f);
+        Vector3 fwd = rot * Vector3.forward;
+        Vector3 right = rot * Vector3.right;
 
-        for (int i = 0; i < spots.Length && i < pool.Length; i++)
-        {
-            CarModels.Handles h = CarModels.Build(transform, pool[i]);
-            h.Root.position = spots[i];
-            h.Root.rotation = Quaternion.Euler(0f, yaws[i], 0f);
+        // صف متجاور بجانب المستقيم: 5 سيارات بتقدم تدريجي على جانب العشب
+        float[] along = { -8f, -2f, 4f, 10f, 16f };
 
-            // مصادم ثابت بسيط (تتصادم معه سيارات اللاعب/المنافسين)
-            BoxCollider col = h.Root.gameObject.AddComponent<BoxCollider>();
-            col.center = new Vector3(0f, 0.45f, 0f);
-            col.size = new Vector3(1.15f, 0.9f, 2.6f);
+        int mask = 1 << TrackLayer;
+        int placed = 0;
+        for (int side = 1; side >= -1 && placed < pool.Length; side -= 2)
+        {
+            for (int i = 0; i < pool.Length && placed < pool.Length; i++)
+            {
+                Vector3 spot = StartPosition
+                             + fwd * (along[i] + 6f)
+                             + right * side * (13f + placed * 0.4f);
+
+                // يجب أن تكون خارج الطريق (عشب) — وإلا جرّب عمقاً أكبر
+                Vector3 probe = spot;
+                bool ok = false;
+                for (int step = 0; step < 4 && !ok; step++)
+                {
+                    if (IsGrass(probe)) { ok = true; spot = probe; break; }
+                    probe += right * side * 3f;
+                }
+                if (!ok) continue;
+
+                // ارتفاع الأرض الفعلي تحت الموضع (سطح الحلبة/الأرضية الإجرائية)
+                // + على البيضاوية نشترط أن يكون المصادم من شبكة العشب نفسها (GRASS)
+                // حتى لا تنغرس السيارة داخل خيام/مدرجات/ديكور المصادمات المحدبة
+                float groundY = StartPosition.y;
+                bool groundOk = false;
+                if (Physics.Raycast(spot + Vector3.up * 15f, Vector3.down, out RaycastHit hit, 60f, mask))
+                {
+                    groundY = hit.point.y;
+                    groundOk = !usingOvalAsset ||
+                               hit.collider.name.ToUpperInvariant().Contains("GRASS");
+                }
+                if (!groundOk) continue;
+
+                CarModels.Handles h = CarModels.Build(transform, pool[placed]);
+                h.Root.position = new Vector3(spot.x, groundY, spot.z);
+                h.Root.rotation = Quaternion.Euler(0f, StartYaw + 90f, 0f);
+
+                // مصادم ثابت بسيط (تتصادم معه سيارات اللاعب/المنافسين)
+                BoxCollider col = h.Root.gameObject.AddComponent<BoxCollider>();
+                col.center = new Vector3(0f, 0.45f, 0f);
+                col.size = new Vector3(1.15f, 0.9f, 2.6f);
+
+                placed++;
+            }
         }
+
+        Debug.Log($"[TrackBuilder] سيارات متوقفة ديكورياً: {placed}/{pool.Length}");
     }
 
     // ================= استعلام السطح =================
@@ -441,7 +476,7 @@ public class TrackBuilder : MonoBehaviour
             Renderer tarmac = FindRendererBySubstring(terrainGo.transform, "TARMAC");
             ovalRoadBounds = tarmac != null ? tarmac.bounds : new Bounds(MapCenter, new Vector3(228f, 1f, 110f));
             StartPosition = new Vector3(ovalRoadBounds.center.x, 1.0f, ovalRoadBounds.min.z + 5f);
-            StartYaw = 0f;
+            StartYaw = 90f; // v1.6.0: شرقاً على المستقيم الجنوبي
             BuildDefaultOvalGates();
         }
 
@@ -626,7 +661,7 @@ public class TrackBuilder : MonoBehaviour
         if (southRows.Count == 0)
         {
             StartPosition = new Vector3(ovalRoadBounds.center.x, 1.0f, ovalRoadBounds.min.z + 5f);
-            StartYaw = 0f;
+            StartYaw = 90f; // v1.6.0: شرقاً مثل المسار الرئيسي
             return;
         }
 
@@ -659,7 +694,7 @@ public class TrackBuilder : MonoBehaviour
             surfaceY = hit.point.y + 0.4f;
 
         StartPosition = new Vector3(startX, surfaceY, startZ);
-        StartYaw = 0f; // شرقاً (+X) على المستقيم الجنوبي — سباق عكس عقارب الساعة
+        StartYaw = 90f; // v1.6.0 إصلاح: yaw=90 ⇒ forward=+X شرقاً على المستقيم الجنوبي (yaw=0 كان شمالاً نحو الجزيرة!) — سباق عكس عقارب الساعة
     }
 
     struct OvalSpan { public float min; public float max; public bool ok; }
