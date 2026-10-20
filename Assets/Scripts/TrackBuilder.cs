@@ -807,6 +807,9 @@ public class TrackBuilder : MonoBehaviour
             BoxCollider col = go.AddComponent<BoxCollider>();
             col.center = new Vector3(x0 + w * 0.5f, y - skirt * 0.5f, z0 + h * 0.5f);
             col.size = new Vector3(w, skirt, h);
+
+            // (v2.5.0) تسجيله للتنسيق اللاحق مع سطح الطريق (إزالة/تخفيض قرب الممر)
+            bakedSoftRects.Add(new BakedRect { x0 = x0, z0 = z0, w = w, h = h, top = y, col = col });
         }
 
         Mesh mesh = new Mesh
@@ -856,6 +859,13 @@ public class TrackBuilder : MonoBehaviour
     /// <summary>وسم مصدر خط السباق للطبقة التشخيصية (BAKED / SCAN:n / SCAN-FAIL).</summary>
     public static string LineSourceTag = "-";
 
+    // (v2.5.0) سجلات الأسطح المخبوزة لممرّض التنسيق — القضاء على «الجدران غير المرئية»:
+    // ثلاث طبقات مصادمات متراكبة (شبكة الأرض + السطح + الردم) حيثما تتقاطع
+    // بفروق سنتيمترات تخلق جدراناً رأسية غير مرئية ومصائد تماسك عشب فوق الطريق نفسه
+    struct BakedRect { public float x0, z0, w, h, top; public Collider col; }
+    readonly List<BakedRect> bakedDeckRects = new List<BakedRect>();
+    readonly List<BakedRect> bakedSoftRects = new List<BakedRect>();   // الشبكة + الردم
+
     /// <summary>v2.2.0 — استبدال خط السباق بالخط المخبوز المثبت هندسياً.
     /// يلغي الاعتماد على ScanOvalRoad الذي فشل دائماً على الأجهزة فورثُ المسار
     /// الإجرائي الاحتياطي (مستطيل 14..134 × 12..76 فوق منطقة الجراجات!)
@@ -890,12 +900,17 @@ public class TrackBuilder : MonoBehaviour
     /// (تماسك إسفلت كامل) وGRASS للردم (تماسك عشب) ليصنفهما MotionCoreSurface.</summary>
     void BuildRoadDeck()
     {
-        int deck = BuildDeckFromBlob(DeckB64, "RoadDeck_TARMAC");
-        int fill = BuildDeckFromBlob(FillB64, "FillNet_GRASS");
+        // (v2.5.0) رفع سطح الطريق +0.09م: كان مخبوزاً على ارتفاع السطح الحقيقي −0.05..0.075
+        // فيتصاعد المرور بين سطحين متوازيين (الشبكة الأصلية حيث تطبخ وبلاطات السطح حيث
+        // لا تطبخ) = قفزات ارتطام عند كل حدود مناطق الطبخ. الرفع يجعل بلاطاتنا أعلى من
+        // الشبكة الأصلية بـ 1.5..4سم = سطح قيادة وحيد متجانس فوق كل الحلبة
+        int deck = BuildDeckFromBlob(DeckB64, "RoadDeck_TARMAC", 0.09f, true);
+        int fill = BuildDeckFromBlob(FillB64, "FillNet_GRASS", 0f, false);
         Debug.Log($"[TrackBuilder] v2.2.0: سطح الطريق الصلب {deck} مستطيل + ردم عشب {fill} مستطيل");
+        HarmonizeBakedSurfaces();
     }
 
-    int BuildDeckFromBlob(string b64, string goName)
+    int BuildDeckFromBlob(string b64, string goName, float topOffset, bool isDeck)
     {
         byte[] data;
         try { data = System.Convert.FromBase64String(b64); }
@@ -918,7 +933,7 @@ public class TrackBuilder : MonoBehaviour
             int cz = System.BitConverter.ToInt16(data, r * 10 + 2);
             int w2 = System.BitConverter.ToInt16(data, r * 10 + 4);
             int h2 = System.BitConverter.ToInt16(data, r * 10 + 6);
-            float y = System.BitConverter.ToInt16(data, r * 10 + 8) * 0.05f;
+            float y = System.BitConverter.ToInt16(data, r * 10 + 8) * 0.05f + topOffset;
 
             float x0 = DeckOrigin + cx * DeckCell;
             float z0 = DeckOrigin + cz * DeckCell;
@@ -929,8 +944,88 @@ public class TrackBuilder : MonoBehaviour
             BoxCollider col = go.AddComponent<BoxCollider>();
             col.center = new Vector3(x0 + w * 0.5f, y - 15f, z0 + h * 0.5f);
             col.size = new Vector3(w, 30f, h);
+
+            // (v2.5.0) تسجيل المستطيل لممرّض التنسيق: السطح إلى قائمة الأرضية،
+            // والردم إلى قائمة «اللينة» (المرشّحة للإزالة/التخفيض قرب الطريق)
+            BakedRect br = new BakedRect { x0 = x0, z0 = z0, w = w, h = h, top = y, col = col };
+            if (isDeck) bakedDeckRects.Add(br);
+            else bakedSoftRects.Add(br);
         }
         return recCount;
+    }
+
+    /// <summary>
+    /// (v2.5.0) ممرّض تنسيق الأسطح المخبوزة — إبقاء الطريق سطحاً واحداً بلا مفاجآت:
+    /// 1) أي مصادم ردم/شبكة يتقاطع أفقياً مع بلاطة طريق يُستبدل (السطح صاحب القرار
+    ///    في ممر القيادة — يمنع مصائد تماسك العشب فوق الإسفلت والجدران بين الطبقات).
+    /// 2) أي مصادم قريب من الطريق (±4م) قمته أعلى من حافة الطريق يُخفَّض إلى
+    ///    حافة الطريق −6سم حتى يصبح الدخول/الخروج من العشب تدحرجاً لا جداراً.
+    /// </summary>
+    void HarmonizeBakedSurfaces()
+    {
+        if (bakedDeckRects.Count == 0) return;
+
+        // شبكة خلايا 2م من إحداثيات بلاطات الطريق (نفس محور شبكة blobs)
+        var deckCells = new Dictionary<long, float>();
+        foreach (BakedRect r in bakedDeckRects)
+        {
+            int ix0 = Mathf.FloorToInt(r.x0 / DeckCell);
+            int ix1 = Mathf.FloorToInt((r.x0 + r.w - 0.01f) / DeckCell);
+            int iz0 = Mathf.FloorToInt(r.z0 / DeckCell);
+            int iz1 = Mathf.FloorToInt((r.z0 + r.h - 0.01f) / DeckCell);
+            for (int ix = ix0; ix <= ix1; ix++)
+            {
+                for (int iz = iz0; iz <= iz1; iz++)
+                {
+                    long k = (long)ix * 1000003L + iz;
+                    if (!deckCells.TryGetValue(k, out float t) || r.top < t)
+                        deckCells[k] = r.top;
+                }
+            }
+        }
+
+        int removed = 0, lowered = 0;
+        foreach (BakedRect rec in bakedSoftRects)
+        {
+            if (rec.col == null) continue;
+
+            int rx0 = Mathf.FloorToInt(rec.x0 / DeckCell);
+            int rx1 = Mathf.FloorToInt((rec.x0 + rec.w - 0.01f) / DeckCell);
+            int rz0 = Mathf.FloorToInt(rec.z0 / DeckCell);
+            int rz1 = Mathf.FloorToInt((rec.z0 + rec.h - 0.01f) / DeckCell);
+
+            bool overlaps = false;
+            float nearMinTop = float.MaxValue;
+            for (int ix = rx0 - 2; ix <= rx1 + 2 && !overlaps; ix++)
+            {
+                for (int iz = rz0 - 2; iz <= rz1 + 2; iz++)
+                {
+                    if (!deckCells.TryGetValue((long)ix * 1000003L + iz, out float t)) continue;
+                    bool inside = ix >= rx0 && ix <= rx1 && iz >= rz0 && iz <= rz1;
+                    if (inside) { overlaps = true; break; }
+                    if (t < nearMinTop) nearMinTop = t;
+                }
+            }
+
+            if (overlaps)
+            {
+                Destroy(rec.col);
+                removed++;
+            }
+            else if (nearMinTop < float.MaxValue && rec.top > nearMinTop - 0.06f)
+            {
+                float newTop = nearMinTop - 0.06f;
+                BoxCollider b = rec.col as BoxCollider;
+                if (b != null)
+                {
+                    b.center = new Vector3(b.center.x, newTop - b.size.y * 0.5f, b.center.z);
+                    lowered++;
+                }
+            }
+        }
+
+        Physics.SyncTransforms();
+        Debug.Log($"[TrackBuilder] v2.5.0: تنسيق الأسطح — أُزيل {removed} مصادماً فوق ممر الطريق، خُفّضت {lowered} حافة قريبة");
     }
 
     /// <summary>

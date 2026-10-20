@@ -317,7 +317,11 @@ public class CarController : MonoBehaviour
             SteerAngleTop = 9f,
             SteerInRate = 240f,
             SteerReturnRate = 330f,
-            Downforce = 95f
+            // (v2.5.0) كان 95 = 10g بالتسارع المباشر — عند ~70كم/س يبلع مسافة التعليق
+            // كاملة (0.3م) فيلتحم جسم السيارة بالأرض ويصدر ارتطامات وهمية عند كل
+            // مفصل بلاطة. الميزانية الفيزيائية: هامش الانضغاط المتاح بعد الثقل
+            // الساكن ≈ 9900 نيوتن → سقف آمن ≈ 9 م/ث² — اعتمدنا 12 مع رفع صلابة النوابض.
+            Downforce = 12f
         };
 
         mc.Configure(setup);
@@ -488,6 +492,11 @@ public class CarController : MonoBehaviour
         bool any = false;
         foreach (Renderer r in GetComponentsInChildren<Renderer>())
         {
+            // (v2.5.0) استبعاد مجسّمات العجلات: إدراجها كان يجعل صندوق الهيكل
+            // يلتف حول العجلات حتى مستوى ملامستها للأرض — أي بروز أرضي صغير
+            // يضرب حافة الصندوق مباشرة = ارتطامات وهمية وصوت اصطدام عند كل سرعة
+            if (IsWheelRenderer(r)) continue;
+
             Bounds b = r.bounds;
             Vector3 lo = transform.InverseTransformPoint(b.min);
             Vector3 hi = transform.InverseTransformPoint(b.max);
@@ -495,7 +504,25 @@ public class CarController : MonoBehaviour
             any = true;
         }
         if (!any) { min = new Vector3(-0.6f, 0f, -1.3f); max = new Vector3(0.6f, 1f, 1.3f); }
-        min.y = Mathf.Max(0.08f, min.y); // المصادم يبدأ فوق سطح العجلات
+        // (v2.5.0) 0.18م فوق الجذر (كان 0.08 والواقع أسفلها عند إدراج العجلات):
+        // خلاصة الهيكل فقط — حتى مع انضغاط التعليق الكامل يبقى وهماً ≈ 20سم
+        min.y = Mathf.Max(0.18f, min.y);
+    }
+
+    /// <summary>(v2.5.0) هل هذا الرندرر ضمن مجسّم عجلة (أو من أبنائه)؟</summary>
+    bool IsWheelRenderer(Renderer r)
+    {
+        for (int i = 0; i < wheelMeshes.Length; i++)
+        {
+            Transform w = wheelMeshes[i];
+            if (w == null) continue;
+            for (Transform t = r.transform; t != null; t = t.parent)
+            {
+                if (t == w) return true;
+                if (t == transform) break;
+            }
+        }
+        return false;
     }
 
     void BuildWheelColliders()
@@ -523,10 +550,11 @@ public class CarController : MonoBehaviour
             WheelCollider wc = wg.AddComponent<WheelCollider>();
             wc.radius = radius;
 
-            // قيم التعليق المرجعية من بريفاب Prometeo (950 كغم)
+            // قيم التعليق: (v2.5.0) نوابض أصلب (50000 ن/م) ولمّاصة مضبوطة (ζ≈0.7)
+            // ليتحمل التعليق قوة الضغط الهوائية دون الالتحام بالأرض عند السرعة
             JointSpring spring = wc.suspensionSpring;
-            spring.spring = 35000f;
-            spring.damper = 4500f;
+            spring.spring = 50000f;
+            spring.damper = 5200f;
             spring.targetPosition = 0.5f;
             wc.suspensionSpring = spring;
             wc.suspensionDistance = 0.3f;
@@ -878,15 +906,21 @@ public class CarController : MonoBehaviour
     }
 
     /// <summary>مؤثر التصادم: صوت ارتطام متدرّج القوة + اهتزاز كاميرا (كما في v0.7.0).
-    /// (v1.4.0: سيارات المنافسين لا تُصدر صوت تصادم الواجهة)</summary>
+    /// (v1.4.0: سيارات المنافسين لا تُصدر صوت تصادم الواجهة)
+    /// (v2.5.0) المقياس الآن = سرعة الاقتراب على عمود الاتصال لا طول السرعة:
+    /// الاحتكاك الأمامي عند 100كم/س كان يعطي 27م/ث «ارتطام» وهمياً عند كل
+    /// مفصل بلاطة/درجة صغيرة = صوت تحطم واهتزاز مستمر — بينما الاحتكاك
+    /// موازٍ للسطح فمركبته على العمود ≈ صفر. الاصطدام الحقيقي بالجدران
+    /// يبقى صاخباً كما هو.</summary>
     void OnCollisionEnter(Collision collision)
     {
         if (isAi) return;
 
-        float impact = collision.relativeVelocity.magnitude;
-        if (impact < 2.5f) return;
+        ContactPoint cp = collision.GetContact(0);
+        float impact = Mathf.Abs(Vector3.Dot(collision.relativeVelocity, -cp.normal));
+        if (impact < 2f) return;
 
-        float impact01 = Mathf.Clamp01((impact - 2.5f) / 10f);
+        float impact01 = Mathf.Clamp01((impact - 2f) / 8f);
 
         if (SoundManager.Instance != null)
             SoundManager.Instance.PlayCrash(impact01);
