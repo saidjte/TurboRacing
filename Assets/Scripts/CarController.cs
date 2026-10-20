@@ -672,6 +672,8 @@ public class CarController : MonoBehaviour
     // ================= إنقاذ السقوط (v1.7.0) =================
 
     private float fallTimer;
+    private float sunkenTimer;   // (v2.1.0) استمرار الغوص الضحل
+    private float offTrackTimer; // (v2.1.0) استمرار البعد عن خط السباق
 
     /// <summary>(v1.8.0) إزاحة جانبية ثابتة لكل سيارة عند الإنقاذ — سيارتان
     /// ساقطتان في نفس اللحظة لا تُعادان لنفس النقطة فتتكدسا وتنفجرا فيزيائياً.</summary>
@@ -691,11 +693,14 @@ public class CarController : MonoBehaviour
     /// (ثقبت شبكة رقيقة عند سرعة عالية أو طارت خارج حدود الأرض) تُعاد
     /// لأقرب نقطة على خط السباق بارتفاع سطحها الحقيقي واتجاهه —
     /// يمنع الغوص للأبد ويشمل اللاعب والمنافسين معاً (نفس المكوّن على الكل).
+    /// (v2.1.0) فحص كل 0.25 ثانية + غوص ضحل (>2.5م) لـ 0.4 ثانية = إنقاذ
+    /// فوري + إنقاذ «التائه»: بعدٌ عن خط السباق >35م لستّ ثوانٍ = إرجاع.
     /// </summary>
     void CheckFallRecovery()
     {
         fallTimer += Time.fixedDeltaTime;
-        if (fallTimer < 0.5f) return; // فحص كل نصف ثانية (أشعة واحدة رخيصة)
+        if (fallTimer < 0.25f) return; // فحص كل ربع ثانية (v2.1.0: كان 0.5)
+        float dt = fallTimer;
         fallTimer = 0f;
 
         RaceFlow rf = RaceFlow.Instance;
@@ -706,12 +711,23 @@ public class CarController : MonoBehaviour
 
         Vector3 p = transform.position;
 
-        bool fell = p.y < -12f; // تحت العالم كلياً
+        // 1) تحت العالم كلياً = إنقاذ فوري
+        bool fell = p.y < -12f;
         if (!fell)
         {
+            // 2) تحت السطح بأكثر من 2.5م لـ 0.4 ثانية متواصلة = غوص مؤكد
             float ground = tb.SurfaceHeightAt(p.x, p.z);
-            fell = ground > -50f && p.y < ground - 4f; // تحت السطح بأكثر من 4 أمتار
+            if (ground > -50f && p.y < ground - 2.5f)
+                sunkenTimer += dt;
+            else
+                sunkenTimer = 0f;
+            fell = sunkenTimer >= 0.4f;
         }
+        else sunkenTimer = 0f;
+
+        // 3) التائه بعيداً عن المسار (v2.1.0): عشب بعيد لا يُنقذ قبل 6 ثوانٍ
+        if (!fell && IsStranded(tb, dt)) fell = true;
+
         if (!fell) return;
 
         if (tb.GetRescuePose(p.x, p.z, RescueLateral, out Vector3 pos, out float yaw))
@@ -721,8 +737,39 @@ public class CarController : MonoBehaviour
             rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
             flipTimer = 0f;
-            Debug.Log($"[CarController] إنقاذ سقوط: أُعيدت السيارة إلى خط السباق عند {pos}");
+            sunkenTimer = 0f;
+            offTrackTimer = 0f;
+            Debug.Log($"[CarController] إنقاذ: أُعيدت السيارة إلى خط السباق عند {pos}");
+
+            if (!isAi && RaceHUD.Instance != null)
+                RaceHUD.Instance.ShowToast("تم إرجاع السيارة إلى المسار");
         }
+    }
+
+    /// <summary>(v2.1.0) هل السيارة تائسة؟ بعد >35م عن أقرب نقطة خط سباق
+    /// لمدة 6 ثوانٍ متواصلة = تائه (قرب العشب المباشر يبقى حراً).</summary>
+    bool IsStranded(TrackBuilder tb, float dt)
+    {
+        Vector3[] line = tb.RacingLine;
+        if (line == null || line.Length < 8) return false;
+
+        Vector3 p = transform.position;
+        float best = float.MaxValue;
+        for (int i = 0; i < line.Length; i++)
+        {
+            float dx = line[i].x - p.x, dz = line[i].z - p.z;
+            float d = dx * dx + dz * dz;
+            if (d < best) best = d;
+        }
+
+        if (best <= 35f * 35f)
+        {
+            offTrackTimer = 0f;
+            return false;
+        }
+
+        offTrackTimer += dt;
+        return offTrackTimer >= 6f;
     }
 
     /// <summary>مؤثر التصادم: صوت ارتطام متدرّج القوة + اهتزاز كاميرا (كما في v0.7.0).

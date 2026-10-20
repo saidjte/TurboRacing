@@ -9,6 +9,8 @@ using UnityEngine.UI;
 /// </summary>
 public class RaceHUD : MonoBehaviour
 {
+    public static RaceHUD Instance { get; private set; }
+
     GameObject canvasGO;
     Text lapText;
     Text timeText;
@@ -17,6 +19,18 @@ public class RaceHUD : MonoBehaviour
     Text posText;
     Text countdownText;
     bool hudShown;
+
+    // (v2.1.0) طبقة تشخيصية + تنبيه الإنقاذ
+    Text dbgText;
+    Text toastText;
+    float dbgNext;
+    float toastUntil;
+    Transform carTr;
+
+    void Awake()
+    {
+        Instance = this;
+    }
 
     void Start()
     {
@@ -55,6 +69,19 @@ public class RaceHUD : MonoBehaviour
             new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 110f),
             new Vector2(800f, 280f), 170, TextAnchor.MiddleCenter, UiKit.Amber, FontStyle.Bold);
         countdownText.text = "";
+
+        // (v2.1.0) طبقة تشخيصية صغيرة أعلى اليسار — إحداثيات السيارة وسطحها
+        // ومسافتها عن خط السباق: كل لقطة شاشة من المستخدم تصبح تقريراً دقيقاً
+        dbgText = UiKit.MakeText(canvasGO.transform, "DbgText",
+            new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(40f, -200f),
+            new Vector2(640f, 130f), 30, TextAnchor.UpperLeft, new Color(1f, 1f, 1f, 0.85f));
+        dbgText.text = "";
+
+        // (v2.1.0) تنبيه الإنقاذ (توست) أسفل المؤقت
+        toastText = UiKit.MakeText(canvasGO.transform, "ToastText",
+            new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -160f),
+            new Vector2(1000f, 70f), 44, TextAnchor.UpperCenter, UiKit.Amber, FontStyle.Bold);
+        toastText.text = "";
 
         UiKit.MakeText(canvasGO.transform, "VersionText",
             new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-16f, -12f),
@@ -107,5 +134,53 @@ public class RaceHUD : MonoBehaviour
         timeText.text = UiKit.FormatTime(lm.CurrentLapTime);
         bestText.text = "BEST " + UiKit.FormatTime(lm.BestLapTime);
         lastText.text = lm.LastLapTime > 0f ? "LAST " + UiKit.FormatTime(lm.LastLapTime) : "";
+
+        UpdateDebug();
+        if (toastText != null && Time.time > toastUntil && toastText.text.Length > 0)
+            toastText.text = "";
+    }
+
+    /// <summary>(v2.1.0) توست رسالة قصيرة (نتائج الإنقاذ وأخبار المسار).</summary>
+    public void ShowToast(string msg)
+    {
+        if (toastText == null) return;
+        toastText.text = msg;
+        toastUntil = Time.time + 2f;
+    }
+
+    /// <summary>(v2.1.0) الطبقة التشخيصية: موضع السيارة وسطحها ومسافتها عن
+    /// خط السباق — تحويل أي شكوى مستخدم إلى بيانات قابلة للتصحيح فوراً.</summary>
+    void UpdateDebug()
+    {
+        if (dbgText == null || Time.unscaledTime < dbgNext) return;
+        dbgNext = Time.unscaledTime + 0.2f;
+
+        if (carTr == null)
+        {
+            GameObject c = GameObject.Find("Car");
+            if (c != null) carTr = c.transform;
+        }
+        if (carTr == null) { dbgText.text = ""; return; }
+
+        Vector3 p = carTr.position;
+        TrackBuilder tb = TrackBuilder.Instance;
+        string surf = tb != null ? tb.SurfaceNameAt(p.x, p.z) : "?";
+
+        float lineD = -1f;
+        Vector3[] line = tb != null ? tb.RacingLine : null;
+        if (line != null && line.Length > 0)
+        {
+            float best = float.MaxValue;
+            for (int i = 0; i < line.Length; i++)
+            {
+                float dx = line[i].x - p.x, dz = line[i].z - p.z;
+                float d = dx * dx + dz * dz;
+                if (d < best) best = d;
+            }
+            lineD = Mathf.Sqrt(best);
+        }
+
+        dbgText.text = $"X {p.x:0.#}  Y {p.y:0.#}  Z {p.z:0.#}\n" +
+                       $"{surf}   line {(lineD >= 0f ? lineD.ToString("0") + "m" : "-")}";
     }
 }
