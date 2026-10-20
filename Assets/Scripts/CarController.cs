@@ -603,6 +603,7 @@ public class CarController : MonoBehaviour
         // هذه الحلقة للمؤثرات والإنقاذ الذاتي فقط.
         UpdateDriftEffects();
         CheckFlipRecovery();
+        CheckFallRecovery();
     }
 
     float ForwardSpeed()
@@ -650,7 +651,11 @@ public class CarController : MonoBehaviour
             {
                 float yaw = transform.eulerAngles.y;
                 Vector3 p = transform.position;
-                p.y = 1.2f;
+                // v1.7.0: الارتفاع من سطح الحلبة الفعلي (البيضاوية المقعّرة المرتفعة
+                // تحتاج أكثر من 1.2م الثابتة — كانت تُعاد داخل الميل)
+                TrackBuilder tb = TrackBuilder.Instance;
+                float ground = tb != null ? tb.SurfaceHeightAt(p.x, p.z) : float.MinValue;
+                p.y = (ground > -50f ? ground : 1f) + 0.8f;
                 rb.position = p;
                 rb.rotation = Quaternion.Euler(0f, yaw, 0f);
                 rb.linearVelocity = Vector3.zero;
@@ -661,6 +666,49 @@ public class CarController : MonoBehaviour
         else
         {
             flipTimer = 0f;
+        }
+    }
+
+    // ================= إنقاذ السقوط (v1.7.0) =================
+
+    private float fallTimer;
+
+    /// <summary>
+    /// (v1.7.0) علاج «يغوص الكل في الأرض»: سيارة تنتهي تحت سطح الحلبة
+    /// (ثقبت شبكة رقيقة عند سرعة عالية أو طارت خارج حدود الأرض) تُعاد
+    /// لأقرب نقطة على خط السباق بارتفاع سطحها الحقيقي واتجاهه —
+    /// يمنع الغوص للأبد ويشمل اللاعب والمنافسين معاً (نفس المكوّن على الكل).
+    /// </summary>
+    void CheckFallRecovery()
+    {
+        fallTimer += Time.fixedDeltaTime;
+        if (fallTimer < 0.5f) return; // فحص كل نصف ثانية (أشعة واحدة رخيصة)
+        fallTimer = 0f;
+
+        RaceFlow rf = RaceFlow.Instance;
+        if (rf == null || (rf.State != RaceState.Racing && rf.State != RaceState.Finished)) return;
+
+        TrackBuilder tb = TrackBuilder.Instance;
+        if (tb == null) return;
+
+        Vector3 p = transform.position;
+
+        bool fell = p.y < -12f; // تحت العالم كلياً
+        if (!fell)
+        {
+            float ground = tb.SurfaceHeightAt(p.x, p.z);
+            fell = ground > -50f && p.y < ground - 4f; // تحت السطح بأكثر من 4 أمتار
+        }
+        if (!fell) return;
+
+        if (tb.GetRescuePose(p.x, p.z, out Vector3 pos, out float yaw))
+        {
+            rb.position = pos;
+            rb.rotation = Quaternion.Euler(0f, yaw, 0f);
+            rb.linearVelocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+            flipTimer = 0f;
+            Debug.Log($"[CarController] إنقاذ سقوط: أُعيدت السيارة إلى خط السباق عند {pos}");
         }
     }
 

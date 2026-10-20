@@ -69,6 +69,9 @@ public class RaceFlow : MonoBehaviour
                 GoFlashUntil = Time.time + 0.9f;
                 SetCarFrozen(false);
 
+                // (v1.7.0) تحرير سيارات المنافسين من تجميد العد التنازلي
+                if (AiManager.Instance != null) AiManager.Instance.SetFrozen(false);
+
                 // (v0.7.0) نغمة GO + تحويل المحرك من الخمول إلى القيادة
                 if (SoundManager.Instance != null)
                 {
@@ -102,7 +105,11 @@ public class RaceFlow : MonoBehaviour
         if (carCtrl != null) carCtrl.ApplySelectedModel();
 
         // (v1.4.0) توليد شبكة المنافسين
-        if (AiManager.Instance != null) AiManager.Instance.SpawnGrid();
+        if (AiManager.Instance != null)
+        {
+            AiManager.Instance.SpawnGrid();
+            AiManager.Instance.SetFrozen(true); // (v1.7.0) بلا حركة/تصادم أثناء العد
+        }
 
         ResetCarToStart();
         if (LapManager.Instance != null) LapManager.Instance.ResetRace();

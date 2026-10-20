@@ -66,7 +66,9 @@ public class AiManager : MonoBehaviour
         Vector3 fwd = startRot * Vector3.forward;
         Vector3 right = startRot * Vector3.right;
 
-        float[] back  = { 7f, 7f, 13f, 13f };
+        // v1.7.0: تباعد أكبر (8/14.5م بدل 7/13) — عرض الطريق المكبّر يسمح بذلك
+        // ويمنع أي تلامس عند التوليد
+        float[] back  = { 8f, 8f, 14.5f, 14.5f };
         float[] lanes = { 2.4f, -2.4f, 3.9f, -3.9f };
 
         // خلط مواصفات الموديلات 1..N واختيار أربعة
@@ -86,8 +88,14 @@ public class AiManager : MonoBehaviour
 
             Vector3 slot = startPos - fwd * back[i] + right * lanes[i];
 
+            // v1.7.0: ارتفاع الأرض الفعلي تحت الخانة (سطح الحلبة + 0.4م مثل الانطلاق)
+            // — المستقيمات المكبّرة قد تميل فلا يكفي y نقطة الانطلاق لكل الصفوف
+            float slotY = startPos.y;
+            float ground = track.SurfaceHeightAt(slot.x, slot.z);
+            if (ground > -50f) slotY = ground + 0.4f;
+
             GameObject go = new GameObject("AiCar_" + (i + 1));
-            go.transform.position = slot;
+            go.transform.position = new Vector3(slot.x, slotY, slot.z);
             go.transform.rotation = startRot; // نفس اتجاه اللاعب
 
             go.AddComponent<Rigidbody>();
@@ -116,6 +124,33 @@ public class AiManager : MonoBehaviour
     }
 
     const int slotsCount = 4;
+
+    /// <summary>
+    /// (v1.7.0) تجميد/تحرير سيارات المنافسين — علاج «تتصادم قبل بداية السباق»:
+    /// كانت تُولد أثناء العد التنازلي Rigidbody حرة (التجميد كان لسيارة اللاعب فقط)
+    /// فتهبط وتتنافر وتتدافع قبل GO. الآن تُجمّد كلياً أثناء العد وتُفك عند الانطلاق.
+    /// </summary>
+    public void SetFrozen(bool frozen)
+    {
+        foreach (GameObject go in spawnedCars)
+        {
+            if (go == null) continue;
+
+            Rigidbody rb = go.GetComponent<Rigidbody>();
+            if (rb == null) continue;
+
+            if (frozen)
+            {
+                rb.linearVelocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+                rb.constraints = RigidbodyConstraints.FreezeAll;
+            }
+            else
+            {
+                rb.constraints = RigidbodyConstraints.None;
+            }
+        }
+    }
 
     /// <summary>إزالة كل المنافسين (العودة للقائمة/بدء سباق جديد).</summary>
     public void DespawnAll()

@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// TurboRacing - v1.0.0 (لعبة ثلاثية الأبعاد حقيقية) — مطوّرة v1.3.0 (مسار أعرض وبلا حواجز)
+/// TurboRacing - v1.0.0 (لعبة ثلاثية الأبعاد حقيقية) — مطوّرة v1.7.0 (حلبة أعرض وانطلاق صحيح)
 /// يبني الحلبة كعالم مجسّم كامل بالكود (بلا أي أصول خارجية):
 /// - أرضية عشب واسعة بنسيج مكرر (خطوط جز + حبيبات)
 /// - طريق إسفلت كشبكة واحدة + خط بداية/نهاية مربعات كُرْد
@@ -14,6 +14,12 @@ using UnityEngine;
 /// - أشجار (جذع + تُيج) ومدرّجات جمهور ولوحات إعلانات وبوابة انطلاق
 /// - v1.3.0: طريق عرضه 8 بلاطات (16 متراً بدل 12) على خريطة 72×44 بلاطة
 ///   مع إعادة تموضع كل الديكور (لوحات/بوابة الانطلاق) وبوابات اللفة والانطلاق
+/// - v1.7.0 على البيضاوية: الطريق الرئيسي حصراً في المسح (كانت الطرق الداخلية
+///   للجزيرة وحارة pitlane والجراجات تلوّث خط السباق فتحوّ الانطلاق نحو الجزيرة)،
+///   انطلاق على مستقيم الأصل الملاصق لحارة الـ pitlane (خط بداية الأصل الحقيقي)،
+///   بوابات اللفة مشتقة من أرباع خط السباق، وتكبير الحلبة ×1.5 (طريق أعرض)،
+///   والديكور القريب من الطريق بلا مصادمات (كانت القباب المحدبة للجسور/اللافتات
+///   تعترض الطريق فترمي السيارات).
 /// أداءً: كل النوع الواحد مدموج في شبكة واحدة = دورة رسم قليلة جداً.
 /// </summary>
 public class TrackBuilder : MonoBehaviour
@@ -73,7 +79,19 @@ public class TrackBuilder : MonoBehaviour
     bool usingOvalAsset;
     const string TrackRes = "GameAssets/CartoonOvalTrack/";
     const int TrackLayer = 10; // طبقة مصادمات الحلبة البيضاوية (أشعة العشب/المسح)
+
+    /// <summary>(v1.7.0) تكبير موحّد لوحدات الحلبة البيضاوية — علاج «المسار ضيق جدا».
+    /// كل الأنظمة (بوابات/خط سباق/انطلاق/عشب) مشتقة بالأشعة فتتكيف تلقائياً.</summary>
+    const float OvalScale = 1.5f;
+
+    /// <summary>خلايا الطريق الرئيسي حصراً (TARMAC_OVAL) — أساس خط السباق والبوابات
+    /// والانطلاق. v1.7.0: استُبعدت الطرق الداخلية للجزيرة وحارة pitlane والجراجات
+    /// التي كانت تلوّث الخط وتسحبه نحو الجزيرة.</summary>
     readonly HashSet<long> ovalRoadCells = new HashSet<long>();
+
+    /// <summary>(v1.7.0) خلايا حارة الـ pitlane — تُحدّد مستقيم البداية الحقيقي
+    /// (حارة الـ pitlane تلاصق مستقيم الأصل الرئيسي دائماً في هذا الأصل).</summary>
+    readonly HashSet<long> ovalPitCells = new HashSet<long>();
     float ovalScanStep = 2f;
     Bounds ovalRoadBounds;
 
@@ -86,7 +104,8 @@ public class TrackBuilder : MonoBehaviour
         {
             usingOvalAsset = true;
             BuildOvalRacingLine();
-            Debug.Log($"[TrackBuilder] الحلبة البيضاوية (Cartoon Oval) جاهزة: انطلاق من {StartPosition}");
+            AlignOvalStartAndGates(); // v1.7.0: اتجاه الانطلاق والبوابات من خط السباق نفسه
+            Debug.Log($"[TrackBuilder] الحلبة البيضاوية (Cartoon Oval ×{OvalScale:0.0}) جاهزة: انطلاق من {StartPosition} بyaw {StartYaw:0}°");
             return;
         }
 
@@ -431,6 +450,53 @@ public class TrackBuilder : MonoBehaviour
         return c != RoadChar && c != StartChar;
     }
 
+    // ================= مساعدات السطح والإنقاذ (v1.7.0) =================
+
+    /// <summary>ارتفاع سطح الحلبة عند (x,z) بالأشعة على طبقة الحلبة —
+    /// float.MinValue إن لم يوجد سطح (خارج العالم).</summary>
+    public float SurfaceHeightAt(float x, float z)
+    {
+        int mask = 1 << TrackLayer;
+        if (Physics.Raycast(new Vector3(x, 30f, z), Vector3.down, out RaycastHit hit, 80f, mask))
+            return hit.point.y;
+        return float.MinValue;
+    }
+
+    /// <summary>وضع إنقاذ لسيارة ساقطة: أقرب نقطة على خط السباق + ارتفاع سطحها
+    /// الحقيقي + اتجاه المقطع التالي. false إن لم يوجد خط سباق صالح.</summary>
+    public bool GetRescuePose(float x, float z, out Vector3 pos, out float yaw)
+    {
+        pos = Vector3.zero;
+        yaw = 0f;
+
+        Vector3[] line = RacingLine;
+        if (line == null || line.Length < 8) return false;
+
+        int n = line.Length;
+        int best = 0;
+        float bestD = float.MaxValue;
+        for (int i = 0; i < n; i++)
+        {
+            float dx = line[i].x - x;
+            float dz = line[i].z - z;
+            float d = dx * dx + dz * dz;
+            if (d < bestD) { bestD = d; best = i; }
+        }
+
+        Vector3 at = line[best];
+        float gy = SurfaceHeightAt(at.x, at.z);
+        if (gy == float.MinValue) gy = 1.0f;
+
+        Vector3 nxt = line[(best + 1) % n];
+        Vector3 dir = nxt - at;
+        dir.y = 0f;
+        if (dir.sqrMagnitude < 1e-6f) dir = Vector3.forward;
+        yaw = Mathf.Atan2(dir.x, dir.z) * Mathf.Rad2Deg;
+
+        pos = new Vector3(at.x, gy + 0.6f, at.z);
+        return true;
+    }
+
     // ==================================================================
     // ============ v1.5.0: الحلبة البيضاوية (الأصل المطلوب) ============
     // ==================================================================
@@ -448,17 +514,20 @@ public class TrackBuilder : MonoBehaviour
         InstantiateOvalModule("oval_mod_lines", OvalColliderMode.None);
         InstantiateOvalModule("oval_mod_startlights", OvalColliderMode.None);
 
-        // 3) الديكور بمصادمات محدبة — منها مبنى الجراج الفعلي (GarageStage العالمي)
+        // 3) الديكور — v1.7.0: مصادمات فقط لما هو بعيد عن الطريق (مبانٍ/مدرّجات/خيام).
+        // pitwall/جسور/لافتات/إطارات/صناديق/أعمدة: بلا مصادمات — قبابها المحدبة كانت
+        // تعترض الطريق (جسر فوق المسار = صندوق صلب يحجبه!) فترمي السيارات (تطير/تغوص)
+        // + طلب المستخدم الدائم: لا حواجز قرب المسار.
         InstantiateOvalModule("oval_mod_buildings",   OvalColliderMode.Convex);
         InstantiateOvalModule("oval_mod_seats",       OvalColliderMode.Convex);
-        InstantiateOvalModule("oval_mod_pitwall",     OvalColliderMode.Convex);
-        InstantiateOvalModule("oval_mod_lamps",       OvalColliderMode.Convex);
-        InstantiateOvalModule("oval_mod_tyres",       OvalColliderMode.Convex);
-        InstantiateOvalModule("oval_mod_banners",     OvalColliderMode.Convex);
         InstantiateOvalModule("oval_mod_tents",       OvalColliderMode.Convex);
-        InstantiateOvalModule("oval_mod_turnsigns",   OvalColliderMode.Convex);
-        InstantiateOvalModule("oval_mod_bridges",     OvalColliderMode.Convex);
-        InstantiateOvalModule("oval_mod_blocks",      OvalColliderMode.Convex);
+        InstantiateOvalModule("oval_mod_pitwall",     OvalColliderMode.None);
+        InstantiateOvalModule("oval_mod_lamps",       OvalColliderMode.None);
+        InstantiateOvalModule("oval_mod_tyres",       OvalColliderMode.None);
+        InstantiateOvalModule("oval_mod_banners",     OvalColliderMode.None);
+        InstantiateOvalModule("oval_mod_turnsigns",   OvalColliderMode.None);
+        InstantiateOvalModule("oval_mod_bridges",     OvalColliderMode.None);
+        InstantiateOvalModule("oval_mod_blocks",      OvalColliderMode.None);
 
         // بلا حواجز بطلب المستخدم: barriers/walls/trees لا تُستنسخ إطلاقاً
 
@@ -470,14 +539,13 @@ public class TrackBuilder : MonoBehaviour
         MapHeightUnits = Mathf.Max(60f, tb.size.z);
         MapCenter = new Vector3(tb.center.x, 0f, tb.center.z);
 
-        // 5) مسح الطريق → الانطلاق + البوابات
+        // 5) مسح الطريق → الانطلاق (البوابات تُبنى لاحقاً من خط السباق في AlignOvalStartAndGates)
         if (!ScanOvalRoad(terrainGo))
         {
             Renderer tarmac = FindRendererBySubstring(terrainGo.transform, "TARMAC");
             ovalRoadBounds = tarmac != null ? tarmac.bounds : new Bounds(MapCenter, new Vector3(228f, 1f, 110f));
             StartPosition = new Vector3(ovalRoadBounds.center.x, 1.0f, ovalRoadBounds.min.z + 5f);
-            StartYaw = 90f; // v1.6.0: شرقاً على المستقيم الجنوبي
-            BuildDefaultOvalGates();
+            StartYaw = 90f; // احتياطي: شرقاً على أدنى مستقيم — يُضبط نهائياً من الخط إن وجد
         }
 
         return true;
@@ -494,6 +562,10 @@ public class TrackBuilder : MonoBehaviour
 
         GameObject go = Instantiate(prefab, Vector3.zero, Quaternion.identity, transform);
         go.name = name;
+
+        // v1.7.0: تكبير موحّد للحلبة (طريق أعرض بطلب المستخدم) — كل الأنظمة
+        // المشتقة بالأشعة/الخلايا تتكيف تلقائياً، والمقياس الموحّد آمن للمصادمات الشبكية
+        go.transform.localScale = Vector3.one * OvalScale;
 
         ApplyOvalModuleMaterials(go, name);
 
@@ -612,7 +684,12 @@ public class TrackBuilder : MonoBehaviour
         ovalRoadBounds = tarmac.bounds;
         ovalRoadBounds.Expand(3f);
 
+        // v1.7.0: تصنيف الخلايا حسب اسم المصادم — الطريق الرئيسي فقط (TARMAC_OVAL)
+        // هو أساس خط السباق/الانطلاق، وحارة PITLANE تُحفظ جانباً لتحديد مستقيم البداية.
+        // (v1.5.0-v1.6.0 كانت تأخذ كل الأسفلت: طرق الجزيرة الداخلية 1TARMAC_inner
+        // والجراجات 1TARMACgarages — فتشوّه الخط نحو الجزيرة وضع الانطلاق في الحارة!)
         ovalRoadCells.Clear();
+        ovalPitCells.Clear();
         int mask = 1 << TrackLayer;
         Vector3 origin = new Vector3(0f, 30f, 0f);
 
@@ -623,12 +700,13 @@ public class TrackBuilder : MonoBehaviour
                 origin.x = x; origin.z = z;
                 if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, 70f, mask))
                 {
-                    if (MotionCoreSurface.IsAsphaltCollider(hit.collider))
-                    {
-                        ovalRoadCells.Add(OvalCellKey(
-                            Mathf.FloorToInt(x / ovalScanStep),
-                            Mathf.FloorToInt(z / ovalScanStep)));
-                    }
+                    string n = hit.collider.name.ToUpperInvariant();
+                    long key = OvalCellKey(
+                        Mathf.FloorToInt(x / ovalScanStep),
+                        Mathf.FloorToInt(z / ovalScanStep));
+
+                    if (n.Contains("OVAL")) ovalRoadCells.Add(key);
+                    else if (n.Contains("PITLANE")) ovalPitCells.Add(key);
                 }
             }
         }
@@ -636,56 +714,129 @@ public class TrackBuilder : MonoBehaviour
         if (ovalRoadCells.Count < 50) return false;
 
         ComputeOvalStartPose();
-        BuildOvalGates();
         return true;
     }
 
+    /// <summary>
+    /// v1.7.0 — موضع الانطلاق من خلايا الطريق الرئيسي حصراً:
+    /// 1) صفوف الطريق (ثابت Z) وأطول مدى أعمدة متصل في كل صف.
+    /// 2) صفوف «المستقيمات» = المدى الطويل (المستقيم يمتد ~180م مقابل ~12م عرضاً).
+    /// 3) شريحة البداية = شريحة المستقيم الأقرب إلى نطاق حارة الـ PITLANE
+    ///    (حارة pitlane هذا الأصل تلاصق مستقيم بدايته الحقيقي — الضوءان والـ pitwall
+    ///    مثبتان عند نقطة الأصل تحقيقاً لذلك)، أو الأقرب لنقطة الأصل إن غابت الحارة.
+    /// 4) نقطة البداية = منتصف أطول مدى أعمدة في الشريحة (وسط الطريق تماماً —
+    ///    لا pitlane الضيقة ولا حافة pitwall التي كانت تفجّر شبكة الانطلاق).
+    /// الاتجاه النهائي (StartYaw) يُضبط لاحقاً من خط السباق في AlignOvalStartAndGates.
+    /// </summary>
     void ComputeOvalStartPose()
     {
-        // المستقيم الجنوبي: الخلايا في أدنى 14 متراً من الطريق
-        float southLimit = ovalRoadBounds.min.z + 14f;
-        float minCellZ = float.MaxValue, maxCellZ = float.MinValue;
-        HashSet<int> southRows = new HashSet<int>();
-
+        // تجميع أعمدة كل صف
+        Dictionary<int, List<int>> rows = new Dictionary<int, List<int>>();
         foreach (long key in ovalRoadCells)
         {
+            int ix = (int)(key >> 32);
             int iz = (int)(key & 0xffffffff);
-            float z = iz * ovalScanStep;
-            if (z <= southLimit)
+            if (!rows.TryGetValue(iz, out List<int> cols))
             {
-                southRows.Add(iz);
-                minCellZ = Mathf.Min(minCellZ, z);
-                maxCellZ = Mathf.Max(maxCellZ, z);
+                cols = new List<int>();
+                rows[iz] = cols;
             }
+            cols.Add(ix);
         }
-        if (southRows.Count == 0)
+
+        if (rows.Count == 0)
         {
             StartPosition = new Vector3(ovalRoadBounds.center.x, 1.0f, ovalRoadBounds.min.z + 5f);
-            StartYaw = 90f; // v1.6.0: شرقاً مثل المسار الرئيسي
+            StartYaw = 90f;
             return;
         }
 
-        HashSet<int> southCols = new HashSet<int>();
-        foreach (long key in ovalRoadCells)
+        // أطول مدى متصل لكل صف (المستقيم = مدى طويل، القوس = مدى قصير)
+        Dictionary<int, int> rowRun = new Dictionary<int, int>();
+        int maxRun = 0;
+        foreach (KeyValuePair<int, List<int>> kv in rows)
         {
-            int iz = (int)(key & 0xffffffff);
-            if (southRows.Contains(iz)) southCols.Add((int)(key >> 32));
+            kv.Value.Sort();
+            int best = 0, cur = 0;
+            for (int i = 0; i < kv.Value.Count; i++)
+            {
+                cur = (i > 0 && kv.Value[i] == kv.Value[i - 1] + 1) ? cur + 1 : 1;
+                if (cur > best) best = cur;
+            }
+            rowRun[kv.Key] = best;
+            if (best > maxRun) maxRun = best;
         }
 
-        List<int> cols = new List<int>(southCols);
-        cols.Sort();
+        // صفوف المستقيمات (>= 60% من أطول مدى) مجمّعة في شرائح متصلة (علوية/سفلية)
+        List<int> straightRows = new List<int>();
+        foreach (KeyValuePair<int, int> kv in rowRun)
+            if (kv.Value >= maxRun * 0.6f) straightRows.Add(kv.Key);
+        straightRows.Sort();
+
+        List<List<int>> groups = new List<List<int>>();
+        for (int i = 0; i < straightRows.Count; i++)
+        {
+            if (i > 0 && straightRows[i] == straightRows[i - 1] + 1)
+                groups[groups.Count - 1].Add(straightRows[i]);
+            else
+                groups.Add(new List<int> { straightRows[i] });
+        }
+
+        if (groups.Count == 0)
+        {
+            StartPosition = new Vector3(ovalRoadBounds.center.x, 1.0f, ovalRoadBounds.min.z + 5f);
+            StartYaw = 90f;
+            return;
+        }
+
+        // نطاق حارة الـ pitlane (يحدد مستقيم بداية الأصل)
+        float pitLo = float.MaxValue, pitHi = float.MinValue;
+        foreach (long key in ovalPitCells)
+        {
+            int iz = (int)(key & 0xffffffff);
+            float z = iz * ovalScanStep;
+            if (z < pitLo) pitLo = z;
+            if (z > pitHi) pitHi = z;
+        }
+        bool hasPit = pitLo <= pitHi;
+
+        // اختيار الشريحة: الأقرب لحارة pitlane، وإلا الأقرب لنقطة الأصل (0)
+        List<int> chosen = groups[0];
+        float bestScore = float.MaxValue;
+        foreach (List<int> g in groups)
+        {
+            float zc = ((g[0] + g[g.Count - 1]) * 0.5f + 0.5f) * ovalScanStep;
+            float score;
+            if (hasPit)
+                score = (zc < pitLo) ? pitLo - zc : (zc > pitHi ? zc - pitHi : 0f);
+            else
+                score = Mathf.Abs(zc);
+
+            if (score < bestScore - 0.01f)
+            {
+                bestScore = score;
+                chosen = g;
+            }
+        }
+
+        // أطول مدى أعمدة داخل صفوف الشريحة = المستقيم نفسه
+        HashSet<int> colSet = new HashSet<int>();
+        foreach (int iz in chosen) colSet.UnionWith(rows[iz]);
+
+        List<int> cols2 = new List<int>(colSet);
+        cols2.Sort();
 
         int bestStart = 0, bestLen = 0, curStart = 0, curLen = 0;
-        for (int i = 0; i < cols.Count; i++)
+        for (int i = 0; i < cols2.Count; i++)
         {
-            if (i > 0 && cols[i] == cols[i - 1] + 1) curLen++;
+            if (i > 0 && cols2[i] == cols2[i - 1] + 1) curLen++;
             else { curStart = i; curLen = 1; }
             if (curLen > bestLen) { bestLen = curLen; bestStart = curStart; }
         }
 
-        int c0 = cols[bestStart], c1 = cols[bestStart + bestLen - 1];
+        int c0 = cols2[bestStart], c1 = cols2[bestStart + bestLen - 1];
         float startX = ((c0 + c1) * 0.5f + 0.5f) * ovalScanStep;
-        float startZ = (minCellZ + maxCellZ) * 0.5f + ovalScanStep * 0.5f;
+        float startZ = ((chosen[0] + chosen[chosen.Count - 1]) * 0.5f + 0.5f) * ovalScanStep;
 
         // ارتفاع سطح الطريق الفعلي عند نقطة الانطلاق
         float surfaceY = 1.0f;
@@ -694,71 +845,95 @@ public class TrackBuilder : MonoBehaviour
             surfaceY = hit.point.y + 0.4f;
 
         StartPosition = new Vector3(startX, surfaceY, startZ);
-        StartYaw = 90f; // v1.6.0 إصلاح: yaw=90 ⇒ forward=+X شرقاً على المستقيم الجنوبي (yaw=0 كان شمالاً نحو الجزيرة!) — سباق عكس عقارب الساعة
+        StartYaw = 90f; // مؤقت — المحاذاة النهائية من خط السباق (AlignOvalStartAndGates)
     }
 
-    struct OvalSpan { public float min; public float max; public bool ok; }
-
-    OvalSpan OvalSpanOfCells(System.Func<Vector2, bool> pred, bool onX)
+    /// <summary>
+    /// v1.7.0 — محاذاة الانطلاق والبوابات على خط السباق نفسه (ضمان التناغم الكامل):
+    /// 1) تدوير خط السباق ليبدأ من أقرب نقطة لموضع الانطلاق (فهرس 0 = الانطلاق).
+    /// 2) StartYaw = اتجاه الخط عند نقطة البداية — لا يمكن أبداً أن يواجه الجزيرة
+    ///    لأن الخط نفسه على منتصف الطريق الرئيسي.
+    /// 3) البوابات = أرباع الخط بالترتيب: [0..2] نقاط التفتيش (الربع 1..3)،
+    ///    [3] خط النهاية عند نقطة البداية (الربع 0) — محاورها ونطاقاتها واتجاهاتها
+    ///    مشتقة من هندسة الخط فتصح تلقائياً على أي اتجاه دوران.
+    /// </summary>
+    void AlignOvalStartAndGates()
     {
-        float lo = float.MaxValue, hi = float.MinValue;
-        foreach (long key in ovalRoadCells)
+        Vector3[] line = RacingLine;
+        if (line == null || line.Length < 12) return; // بلا خط: تبقى القيم الاحتياطية
+
+        int n = line.Length;
+
+        // 1) تدوير الخط ليبدأ عند أقرب نقطة للانطلاق
+        int i0 = 0;
+        float best = float.MaxValue;
+        for (int i = 0; i < n; i++)
         {
-            int ix = (int)(key >> 32);
-            int iz = (int)(key & 0xffffffff);
-            Vector2 c = new Vector2(ix * ovalScanStep, iz * ovalScanStep);
-            if (!pred(c)) continue;
-            float v = onX ? c.x : c.y;
-            lo = Mathf.Min(lo, v); hi = Mathf.Max(hi, v);
+            float dx = line[i].x - StartPosition.x;
+            float dz = line[i].z - StartPosition.z;
+            float d = dx * dx + dz * dz;
+            if (d < best) { best = d; i0 = i; }
         }
 
-        if (lo > hi) return new OvalSpan { ok = false };
-        return new OvalSpan { min = lo - ovalScanStep, max = hi + ovalScanStep, ok = true };
-    }
+        Vector3[] rotated = new Vector3[n];
+        for (int i = 0; i < n; i++) rotated[i] = line[(i0 + i) % n];
+        RacingLine = rotated;
+        line = rotated;
 
-    static LapGate OvalGate(int axis, float plane, OvalSpan span, int dir)
-    {
-        if (!span.ok)
-            return new LapGate { axis = axis, plane = plane, spanMin = -1e5f, spanMax = 1e5f, dir = dir };
-        return new LapGate { axis = axis, plane = plane, spanMin = span.min, spanMax = span.max, dir = dir };
-    }
+        // 2) اتجاه الانطلاق من أول مقاطع الخط
+        Vector3 dir = line[1] - line[0];
+        dir.y = 0f;
+        if (dir.sqrMagnitude > 1e-6f)
+            StartYaw = Mathf.Atan2(dir.x, dir.z) * Mathf.Rad2Deg;
 
-    void BuildOvalGates()
-    {
-        float cx = ovalRoadBounds.center.x, cz = ovalRoadBounds.center.z;
-        float hx = ovalRoadBounds.extents.x, hz = ovalRoadBounds.extents.z;
-
-        // [0] الشرق: عبور Z=cz صعوداً ضمن نطاق X للطريق الشرقي
-        OvalSpan east = OvalSpanOfCells(c => c.x > cx + hx * 0.72f && Mathf.Abs(c.y - cz) < hz * 0.18f, true);
-        // [1] الشمال: عبور X=cx غرباً ضمن نطاق Z للطريق الشمالي
-        OvalSpan north = OvalSpanOfCells(c => c.y > cz + hz * 0.72f && Mathf.Abs(c.x - cx) < hx * 0.18f, false);
-        // [2] الغرب: عبور Z=cz هبوطاً ضمن نطاق X للطريق الغربي
-        OvalSpan west = OvalSpanOfCells(c => c.x < cx - hx * 0.72f && Mathf.Abs(c.y - cz) < hz * 0.18f, true);
-        // [3] النهاية: عبور X=startX شرقاً ضمن نطاق Z للمستقيم الجنوبي
-        OvalSpan south = OvalSpanOfCells(c => c.y < cz - hz * 0.72f && Mathf.Abs(c.x - StartPosition.x) < hx * 0.18f, false);
+        // 3) بوابات الأرباع
+        LapGate[] gates = new LapGate[4];
+        for (int k = 0; k < 4; k++)
+        {
+            int iq = (k * n / 4) % n;
+            gates[k] = GateFromLine(line, iq, n);
+        }
 
         LapGates = new[]
         {
-            OvalGate(1, cz, east, +1),
-            OvalGate(0, cx, north, -1),
-            OvalGate(1, cz, west, -1),
-            OvalGate(0, StartPosition.x, south, +1)
+            gates[1], gates[2], gates[3], gates[0] // [0..2] تفتيش ثم [3] نهاية عند الانطلاق
         };
+
+        Debug.Log($"[TrackBuilder] محاذاة v1.7.0: yaw={StartYaw:0.0}° عند {StartPosition} — بوابات أرباع خط {n} نقطة");
     }
 
-    void BuildDefaultOvalGates()
+    static LapGate GateFromLine(Vector3[] line, int iq, int n)
     {
-        float cx = ovalRoadBounds.center.x, cz = ovalRoadBounds.center.z;
-        float hx = ovalRoadBounds.extents.x, hz = ovalRoadBounds.extents.z;
-        float rw = Mathf.Min(16f, Mathf.Min(hx, hz) * 0.25f);
+        Vector3 a = line[iq];
+        Vector3 b = line[(iq + 1) % n];
+        Vector3 d = b - a;
+        d.y = 0f;
 
-        LapGates = new[]
+        bool alongX = Mathf.Abs(d.x) >= Mathf.Abs(d.z);
+
+        // نطاق العبور على المحور الآخر من نافذة نقاط حول الربع
+        int w = Mathf.Max(2, n / 24);
+        float lo = float.MaxValue, hi = float.MinValue;
+        for (int j = -w; j <= w; j++)
         {
-            new LapGate { axis = 1, plane = cz,  spanMin = cx + hx - rw, spanMax = cx + hx + 2f, dir = +1 },
-            new LapGate { axis = 0, plane = cx,  spanMin = cz + hz - rw, spanMax = cz + hz + 2f, dir = -1 },
-            new LapGate { axis = 1, plane = cz,  spanMin = cx - hx - 2f, spanMax = cx - hx + rw, dir = -1 },
-            new LapGate { axis = 0, plane = StartPosition.x, spanMin = ovalRoadBounds.min.z, spanMax = ovalRoadBounds.min.z + rw, dir = +1 }
-        };
+            Vector3 q = line[((iq + j) % n + n) % n];
+            float v = alongX ? q.z : q.x;
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+        }
+
+        LapGate g;
+        if (alongX)
+        {
+            g.axis = 0; g.plane = a.x; g.dir = d.x >= 0f ? 1 : -1;
+        }
+        else
+        {
+            g.axis = 1; g.plane = a.z; g.dir = d.z >= 0f ? 1 : -1;
+        }
+        g.spanMin = lo - 1f;
+        g.spanMax = hi + 1f;
+        return g;
     }
 
     /// <summary>خط السباق البيضاوي (v1.5.0 لسيارات المنافسين): دلو زاوي حول مركز
