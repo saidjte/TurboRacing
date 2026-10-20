@@ -103,6 +103,11 @@ public class TrackBuilder : MonoBehaviour
     float ovalScanStep = 2f;
     Bounds ovalRoadBounds;
 
+    /// <summary>(v2.0.0) وحدة أضواء الانطلاق — جسم البوابة startlights_body هو
+    /// علامة خط البداية/النهاية الحقيقية للأصل. الانطلاق يُحاذى إليه بدل
+    /// «وسط المستقيم» الذي كان يقع ~24م شرق البوابة الحقيقية.</summary>
+    Transform ovalStartLights;
+
     void Awake()
     {
         Instance = this;
@@ -641,7 +646,7 @@ public class TrackBuilder : MonoBehaviour
 
         // 3) خطوط الطلاء فوق الإسفلت (بلا مصادم) + أضواء الانطلاق (بلا مصادم)
         InstantiateOvalModule("oval_mod_lines", OvalColliderMode.None);
-        InstantiateOvalModule("oval_mod_startlights", OvalColliderMode.None);
+        ovalStartLights = InstantiateOvalModule("oval_mod_startlights", OvalColliderMode.None); // v2.0.0: مرجع بوابة الانطلاق الحقيقية
 
         // 4) الديكور — v1.8.0: بلا مصادمات إطلاقاً + إسقاط ما يقطع الطريق.
         //    الجذر الحقيقي لـ «تطير/تغوص/تتكدس» منذ v1.5.0: مدرّجان في وحدة المقاعد
@@ -735,7 +740,6 @@ public class TrackBuilder : MonoBehaviour
         EnsureOvalMaterials();
 
         const float Cell = 8f;
-        const float Y = 0f;          // ارتفاع الملء = سطح القاعدة (الطرق القانونية 0..7م فوقه لا تحته)
         const float RayTop = 150f;   // بداية الأشعة فوق أعلى تلّ (77م)
         const float RayDepth = 400f; // تغطي القاع الصخري حتى -250م
         const float AbyssBelow = -15f; // كل سطح أدنى من هذا = قاع الفجوة (لا سطح حقيقي)
@@ -763,12 +767,16 @@ public class TrackBuilder : MonoBehaviour
                     hit.point.y > AbyssBelow)
                     continue; // سطح قانوني (إسفلت/عشب/حصى/رمل) — لا ملء
 
-                // بلاطة 8×8 عند سطح القاعدة (رؤوس مع اتجاه مزدوج عبر مثلثين)
+                // بلاطة 8×8 — v2.0.0: الارتفاع = مستوى التضاريس المحيطة بالخلية
+                // (وسيط أول سطح قانوني في 8 اتجاهات) بدل صفر مطلق كان يترك البلاطة
+                // في قاع حفرة بعمق 15-25م بين تضاريس مرتفعة = «الغوص في الأرض».
+                float y = SurroundingSurfaceHeight(cx, cz);
+
                 int b = verts.Count;
-                verts.Add(new Vector3(x, Y, z));
-                verts.Add(new Vector3(x + Cell, Y, z));
-                verts.Add(new Vector3(x + Cell, Y, z + Cell));
-                verts.Add(new Vector3(x, Y, z + Cell));
+                verts.Add(new Vector3(x, y, z));
+                verts.Add(new Vector3(x + Cell, y, z));
+                verts.Add(new Vector3(x + Cell, y, z + Cell));
+                verts.Add(new Vector3(x, y, z + Cell));
                 // وجه علوي
                 tris.Add(b); tris.Add(b + 2); tris.Add(b + 1);
                 tris.Add(b); tris.Add(b + 3); tris.Add(b + 2);
@@ -817,8 +825,43 @@ public class TrackBuilder : MonoBehaviour
 
         Physics.SyncTransforms(); // الخبز قبل أي أشعة لاحقة (خط البداية/الإنقاذ)
 
-        Debug.Log($"[TrackBuilder] v1.9.0: مُلئت {cells} فجوة تضاريس (شبكة 8م) — لا غوص بعد اليوم");
+        Debug.Log($"[TrackBuilder] v2.0.0: مُلئت {cells} فجوة تضاريس بارتفاع التضاريس المحيطة (شبكة 8م) — لا غوص ولا حفر");
     }
+
+    /// <summary>
+    /// (v2.0.0) مستوى التضاريس المحيطة بنقطة فجوة: أول سطح قانوني (> -15م)
+    /// في 8 اتجاهات على مسافات 8..64م، ثم وسيط القيم الملتقطة — فيتبع أرضية
+    /// الملء ارتفاع الأرض المجاورة (عشب/جبال) فلا تُترك في قاع حفرة،
+    /// والخلايا المعزولة كلياً تبقى عند صفر القاعدة.
+    /// </summary>
+    float SurroundingSurfaceHeight(float x, float z)
+    {
+        const float LegalAbove = -15f;
+        List<float> ys = new List<float>(8);
+        int mask = 1 << TrackLayer;
+
+        for (int d = 0; d < 8; d++)
+        {
+            float ang = d * Mathf.PI / 4f;
+            float dx = Mathf.Cos(ang), dz = Mathf.Sin(ang);
+            for (int r = 8; r <= 64; r += 8)
+            {
+                Vector3 o = new Vector3(x + dx * r, RayTopSafe, z + dz * r);
+                if (Physics.Raycast(o, Vector3.down, out RaycastHit h, 400f, mask) &&
+                    h.point.y > LegalAbove)
+                {
+                    ys.Add(h.point.y);
+                    break;
+                }
+            }
+        }
+
+        if (ys.Count == 0) return 0f;
+        ys.Sort((a, b) => a.CompareTo(b));
+        return ys[ys.Count / 2];
+    }
+
+    const float RayTopSafe = 150f;
 
     GameObject InstantiateOvalModule(string name, OvalColliderMode mode)
     {
@@ -1138,6 +1181,54 @@ public class TrackBuilder : MonoBehaviour
         if (line == null || line.Length < 12) return; // بلا خط: تبقى القيم الاحتياطية
 
         int n = line.Length;
+
+        // ===== v2.0.0 — محاذاة الانطلاق إلى بوابة أضواء الانطلاق الحقيقية =====
+        // جسم البوابة startlights_body هو علامة خط البداية/النهاية في الأصل
+        // (تحليل APK: مركزها X≈-24 فوق المستقيم الشمالي). «وسط المستقيم»
+        // الخوارزمي كان يقع عند X≈0 = ~24م شرق البوابة فبدت نقطة الانطلاق
+        // خاطئة بوضوح أمام البوابة الظاهرة. الحل: إسقاط موضع البوابة على
+        // خط السباق (منتصف الطريق) واعتماد نقطة الإسقاط انطلاقاً — فيقف
+        // اللاعب تحت الأضواء تماماً ويبقى كل شيء (بوابات/خط مربعات/كاميرا) منسجماً.
+        if (ovalStartLights != null)
+        {
+            Renderer body = FindRendererBySubstring(ovalStartLights, "STARTLIGHTS_BODY");
+            if (body != null)
+            {
+                float gx = body.bounds.center.x;
+                float gz = body.bounds.center.z;
+
+                // أقرب نقطة خط للبوابة ثم إسقاط على المقطعين المجاورين
+                int bi = 0; float bd = float.MaxValue;
+                for (int i = 0; i < n; i++)
+                {
+                    float ddx = line[i].x - gx, ddz = line[i].z - gz;
+                    float d = ddx * ddx + ddz * ddz;
+                    if (d < bd) { bd = d; bi = i; }
+                }
+
+                Vector3 bestPt = line[bi]; float bestD2 = float.MaxValue;
+                for (int s = 0; s < 2; s++)
+                {
+                    Vector3 p0 = s == 0 ? line[bi] : line[(bi - 1 + n) % n];
+                    Vector3 p1 = s == 0 ? line[(bi + 1) % n] : line[bi];
+                    Vector3 seg = p1 - p0; seg.y = 0f;
+                    float len2 = Mathf.Max(1e-6f, seg.sqrMagnitude);
+                    float t = Mathf.Clamp01(Vector3.Dot(new Vector3(gx - p0.x, 0f, gz - p0.z), seg) / len2);
+                    Vector3 pt = p0 + seg * t;
+                    float d2 = (pt.x - gx) * (pt.x - gx) + (pt.z - gz) * (pt.z - gz);
+                    if (d2 < bestD2) { bestD2 = d2; bestPt = pt; }
+                }
+
+                // ارتفاع سطح الطريق الفعلي تحت نقطة الإسقاط
+                float sy = StartPosition.y;
+                if (Physics.Raycast(new Vector3(bestPt.x, 30f, bestPt.z), Vector3.down,
+                                    out RaycastHit ghit, 70f, 1 << TrackLayer))
+                    sy = ghit.point.y + 0.4f;
+
+                StartPosition = new Vector3(bestPt.x, sy, bestPt.z);
+                Debug.Log($"[TrackBuilder] v2.0.0: الانطلاق محاذى لبوابة الأضواء الحقيقية عند {StartPosition}");
+            }
+        }
 
         // 1) تدوير الخط ليبدأ عند أقرب نقطة للانطلاق
         int i0 = 0;
