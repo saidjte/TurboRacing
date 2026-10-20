@@ -26,6 +26,7 @@ public class RaceHUD : MonoBehaviour
     float dbgNext;
     float toastUntil;
     Transform carTr;
+    CarController carCtrl;
 
     void Awake()
     {
@@ -158,7 +159,7 @@ public class RaceHUD : MonoBehaviour
         if (carTr == null)
         {
             GameObject c = GameObject.Find("Car");
-            if (c != null) carTr = c.transform;
+            if (c != null) { carTr = c.transform; carCtrl = c.GetComponent<CarController>(); }
         }
         if (carTr == null) { dbgText.text = ""; return; }
 
@@ -180,7 +181,16 @@ public class RaceHUD : MonoBehaviour
             lineD = Mathf.Sqrt(best);
         }
 
+        // (v2.2.0) السطر الثالث: مصدر خط السباق + حالة المدخلات الحية + السرعة
+        // — من أي لقطة نعرف فوراً: هل الخط مخبوز؟ هل وصل ضغط البنزين للفيزياء؟
+        float spd = carCtrl != null ? carCtrl.SpeedKmh : 0f;
+        string inp = carCtrl != null
+            ? $"G{(carCtrl.DebugGasHeld ? "+" : "-")} S{(carCtrl.DebugSteer > 0f ? "+" : carCtrl.DebugSteer < 0f ? "-" : "0")} B{(carCtrl.DebugBrakeHeld ? "+" : "-")}"
+            : "?";
+        string src = TrackBuilder.LineSourceTag;
+
         dbgText.text = $"X {p.x:0.#}  Y {p.y:0.#}  Z {p.z:0.#}\n" +
-                       $"{surf}   line {(lineD >= 0f ? lineD.ToString("0") + "m" : "-")}";
+                       $"{surf}   line {(lineD >= 0f ? lineD.ToString("0") + "m" : "-")}\n" +
+                       $"{src}   {spd:0}km/h  {inp}";
     }
 }

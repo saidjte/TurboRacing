@@ -93,6 +93,12 @@ public class CarController : MonoBehaviour
 
     /// <summary>هل اللاعب يضغط على البنزين الآن؟ (مفيد للصوت/HUD)</summary>
     public bool IsAccelerating => holdingGas;
+
+    /// <summary>(v2.2.0) حالة المدخلات الحية للطبقة التشخيصية — كل لقطة شاشة
+    /// تصير تقريراً كاملاً: هل وصل ضغط الزر للفيزياء أم لا؟</summary>
+    public bool DebugGasHeld => holdingGas;
+    public bool DebugBrakeHeld => holdingBrake;
+    public float DebugSteer => (holdingLeft ? -1f : 0f) + (holdingRight ? 1f : 0f);
     /// <summary>مُصدِّر مادة الطلاء (يستخدمه SurfaceChecker للتلطيخ على العشب).</summary>
     public MeshRenderer PaintRenderer => paintRenderer;
 
