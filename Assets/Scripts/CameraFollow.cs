@@ -162,7 +162,11 @@ public class CameraFollow : MonoBehaviour
             return;
         }
 
-        // ================= وضع القائمة: منظور علوي مائل يأطر الحلبة =================
+        // ================= وضع القائمة: منظور علوي مائل =================
+        // v1.8.0: التأطير من TrackBuilder — على الحلبة البيضاوية الضخمة (870×420م)
+        // كان تأطير الحلبة كاملة يجعل السيارات المتجاورة «تتكدس» كنقاط واحدة.
+        // الآن: البيضاوية تُؤطَّر عند منطقة الانطلاق (130م) فتظهر الشبكة والسيارات
+        // بوضوح، والإجرائية تبقى مؤطرة كاملة كما كانت.
         if (inOverview)
         {
             TrackBuilder tb = TrackBuilder.Instance;
@@ -175,12 +179,14 @@ public class CameraFollow : MonoBehaviour
                 float halfV = Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
                 float aspect = Mathf.Max(0.6f, cam.aspect);
 
-                // عمق الحلبة يُرى مائلاً (عامل 0.72) والعرض بالكامل
-                float needV = (tb.MapHeightUnits * 0.72f) / halfV;
-                float needH = (tb.MapWidthUnits * 0.55f) / (halfV * aspect);
-                float h = Mathf.Max(needV, needH) * 1.04f;
+                float span = Mathf.Max(60f, tb.OverviewSpan);
 
-                Vector3 c = tb.MapCenter;
+                // العمق المائل (عامل 0.72) والعرض بالكامل
+                float needV = (span * 0.55f) / halfV;
+                float needH = span / (halfV * aspect);
+                float h = Mathf.Max(needV, needH) * 1.06f;
+
+                Vector3 c = tb.OverviewCenter;
                 transform.position = new Vector3(c.x, h, c.z - h * 0.48f);
                 transform.rotation = Quaternion.LookRotation((c + Vector3.up * 1.5f) - transform.position, Vector3.up);
             }

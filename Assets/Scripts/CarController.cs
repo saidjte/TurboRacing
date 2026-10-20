@@ -673,6 +673,19 @@ public class CarController : MonoBehaviour
 
     private float fallTimer;
 
+    /// <summary>(v1.8.0) إزاحة جانبية ثابتة لكل سيارة عند الإنقاذ — سيارتان
+    /// ساقطتان في نفس اللحظة لا تُعادان لنفس النقطة فتتكدسا وتنفجرا فيزيائياً.</summary>
+    private float RescueLateral
+    {
+        get
+        {
+            if (rescueLateral == 0f)
+                rescueLateral = ((GetInstanceID() & 7) - 3.5f) * 1.3f; // -4.55..+4.55م
+            return rescueLateral;
+        }
+    }
+    private float rescueLateral;
+
     /// <summary>
     /// (v1.7.0) علاج «يغوص الكل في الأرض»: سيارة تنتهي تحت سطح الحلبة
     /// (ثقبت شبكة رقيقة عند سرعة عالية أو طارت خارج حدود الأرض) تُعاد
@@ -701,7 +714,7 @@ public class CarController : MonoBehaviour
         }
         if (!fell) return;
 
-        if (tb.GetRescuePose(p.x, p.z, out Vector3 pos, out float yaw))
+        if (tb.GetRescuePose(p.x, p.z, RescueLateral, out Vector3 pos, out float yaw))
         {
             rb.position = pos;
             rb.rotation = Quaternion.Euler(0f, yaw, 0f);

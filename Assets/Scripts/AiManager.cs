@@ -60,16 +60,16 @@ public class AiManager : MonoBehaviour
 
         // شبكة الانطلاق خلف اللاعب (v1.6.0): مواضع مشتقة من StartPosition/StartYaw
         // بدل إحداثيات ثابتة لحلبة قديمة — تعمل على أي حلبة (البيضاوية والإجرائية):
-        // صفاً خلف بعض بجانبين متبادلين على عرض الطريق (±2.4م و±3.9م)
+        // صفاً خلف بعض بجانبين متبادلين على عرض الطريق.
+        // v1.8.0: تباعد أكبر (10/18م) وحارات أوسع (±3.5/±5.5م) — الطريق 22.5م
+        // يتسع لصفّ متباعد واضح، فلا تبدو السيارات «مكدسة» عند العد التنازلي.
         Vector3 startPos = track.StartPosition;
         Quaternion startRot = Quaternion.Euler(0f, track.StartYaw, 0f);
         Vector3 fwd = startRot * Vector3.forward;
         Vector3 right = startRot * Vector3.right;
 
-        // v1.7.0: تباعد أكبر (8/14.5م بدل 7/13) — عرض الطريق المكبّر يسمح بذلك
-        // ويمنع أي تلامس عند التوليد
-        float[] back  = { 8f, 8f, 14.5f, 14.5f };
-        float[] lanes = { 2.4f, -2.4f, 3.9f, -3.9f };
+        float[] back  = { 10f, 10f, 18f, 18f };
+        float[] lanes = { 3.5f, -3.5f, 5.5f, -5.5f };
 
         // خلط مواصفات الموديلات 1..N واختيار أربعة
         List<int> pool = new List<int>();
@@ -87,6 +87,16 @@ public class AiManager : MonoBehaviour
             CarModels.CarSpec spec = CarModels.Get(pool[i]);
 
             Vector3 slot = startPos - fwd * back[i] + right * lanes[i];
+
+            // v1.8.0: ضمان خلوّ الخانة من أي مصادم آخر (طبقة Default = السيارات فقط،
+            // الحلبة على طبقة منفصلة) — إن احتلّت، نتأخر 4م خلفياً حتى نجد فراغاً.
+            int clears = 0;
+            while (clears++ < 6 &&
+                   Physics.OverlapBox(slot + Vector3.up * 0.5f,
+                       new Vector3(1.7f, 1.2f, 2.7f), startRot, 1 << 0).Length > 0)
+            {
+                slot -= fwd * 4f;
+            }
 
             // v1.7.0: ارتفاع الأرض الفعلي تحت الخانة (سطح الحلبة + 0.4م مثل الانطلاق)
             // — المستقيمات المكبّرة قد تميل فلا يكفي y نقطة الانطلاق لكل الصفوف

@@ -39,6 +39,14 @@ public class TrackBuilder : MonoBehaviour
     public float MapWidthUnits { get; private set; }
     public float MapHeightUnits { get; private set; }
 
+    // --- v1.8.0: تأطير كاميرا القائمة ---
+    /// <summary>مركز التأطير في وضع القائمة: الانطلاق على البيضاوية (السيارات
+    /// ظاهرة بحجم واضح)، ومركز الخريطة على الإجرائية (حلبة صغيرة تُرى كاملة).</summary>
+    public Vector3 OverviewCenter => usingOvalAsset ? StartPosition : MapCenter;
+    /// <summary>العرض الأفقي (متر) الذي تغطيه كاميرا القائمة — 100م على البيضاوية
+    /// يُظهر خط البداية والشبكة بحجم واضح دون أن تبدو السيارات نقاطاً متكدسة.</summary>
+    public float OverviewSpan => usingOvalAsset ? 100f : Mathf.Max(60f, MapWidthUnits);
+
     /// <summary>
     /// بوابات اللفة: محور + مستوى عبور + نطاق على المحور الآخر + اتجاه.
     /// axis: 0 = X ، 1 = Z. dir: +1/-1 اتجاه العبور الصحيح.
@@ -105,6 +113,7 @@ public class TrackBuilder : MonoBehaviour
             usingOvalAsset = true;
             BuildOvalRacingLine();
             AlignOvalStartAndGates(); // v1.7.0: اتجاه الانطلاق والبوابات من خط السباق نفسه
+            BuildOvalStartLine();     // v1.8.0: خط بداية مربعات مرئي عند الانطلاق
             Debug.Log($"[TrackBuilder] الحلبة البيضاوية (Cartoon Oval ×{OvalScale:0.0}) جاهزة: انطلاق من {StartPosition} بyaw {StartYaw:0}°");
             return;
         }
@@ -463,8 +472,9 @@ public class TrackBuilder : MonoBehaviour
     }
 
     /// <summary>وضع إنقاذ لسيارة ساقطة: أقرب نقطة على خط السباق + ارتفاع سطحها
-    /// الحقيقي + اتجاه المقطع التالي. false إن لم يوجد خط سباق صالح.</summary>
-    public bool GetRescuePose(float x, float z, out Vector3 pos, out float yaw)
+    /// الحقيقي + اتجاه المقطع التالي + إزاحة جانبية خاصة بكل سيارة (v1.8.0)
+    /// حتى لا تُعاد سيارتان لنفس النقطة فتتكدسا. false إن لم يوجد خط سباق صالح.</summary>
+    public bool GetRescuePose(float x, float z, float lateralOffset, out Vector3 pos, out float yaw)
     {
         pos = Vector3.zero;
         yaw = 0f;
@@ -493,8 +503,94 @@ public class TrackBuilder : MonoBehaviour
         if (dir.sqrMagnitude < 1e-6f) dir = Vector3.forward;
         yaw = Mathf.Atan2(dir.x, dir.z) * Mathf.Rad2Deg;
 
-        pos = new Vector3(at.x, gy + 0.6f, at.z);
+        // v1.8.0: إزاحة جانبية على يمين اتجاه المقطع + رفع إضافي — لا تكدس عند الإعادة
+        Vector3 right = new Vector3(dir.z, 0f, -dir.x).normalized;
+        pos = new Vector3(at.x, gy + 1.0f, at.z) + right * lateralOffset;
         return true;
+    }
+
+    /// <summary>توافق مع الاستدعاءات القديمة (بلا إزاحة جانبية).</summary>
+    public bool GetRescuePose(float x, float z, out Vector3 pos, out float yaw)
+    {
+        return GetRescuePose(x, z, 0f, out pos, out yaw);
+    }
+
+    // ================= خط بداية مرئي (v1.8.0) =================
+
+    /// <summary>
+    /// v1.8.0 — خط بداية مربعات (أبيض/داكن) ممتد على كامل عرض الطريق عند
+    /// نقطة الانطلاق عمودياً على اتجاه الانطلاق. الأصل كان بلا أي علامة مرئية
+    /// (خطوط الأصل وضوؤه مدفونة تحت الأرض بإزاحات GeometricTranslation) —
+    /// فكان المستخدم يرى الانطلاق «في المكان الخطأ». الشرائح تتبع ارتفاع
+    /// السطح الفعلي عبر العرض فلا تطفو ولا تنغرس.
+    /// </summary>
+    void BuildOvalStartLine()
+    {
+        if (!usingOvalAsset || ovalRoadCells.Count == 0) return;
+
+        Quaternion rot = Quaternion.Euler(0f, StartYaw, 0f);
+        Vector3 fwd = rot * Vector3.forward;
+        Vector3 right = rot * Vector3.right;
+        Vector3 center = StartPosition;
+
+        Texture2D checker = CheckerTexture();
+        if (checker == null) return;
+
+        Material mat = new Material(Shader.Find("Standard"));
+        mat.name = "StartLineChecker";
+        mat.mainTexture = checker;
+        mat.mainTextureScale = new Vector2(10f, 1f);
+        if (mat.HasProperty("_Glossiness")) mat.SetFloat("_Glossiness", 0.1f);
+
+        const float HalfSpan = 14f;  // ±14م من المركز = يغطي عرض الطريق (22.5م)
+        const float HalfThick = 1.1f; // نصف سماكة الخط على طول المسار
+        const int Slices = 8;        // شرائح عرضية تتبع سطح الطريق
+
+        GameObject root = new GameObject("OvalStartLine");
+        root.transform.SetParent(transform, false);
+
+        Vector3 prevPos = Vector3.zero;
+        bool hasPrev = false;
+
+        for (int i = 0; i <= Slices; i++)
+        {
+            float t = i / (float)Slices;               // -1..1 على العرض
+            float lateral = Mathf.Lerp(-HalfSpan, HalfSpan, t);
+            Vector3 at = center + right * lateral;
+
+            int mask = 1 << TrackLayer;
+            if (!Physics.Raycast(at + Vector3.up * 25f, Vector3.down, out RaycastHit hit, 70f, mask) ||
+                !MotionCoreSurface.IsAsphaltCollider(hit.collider))
+            {
+                hasPrev = false; // قطع عند حافة الأسفلت (لا يمتد على العشب)
+                continue;
+            }
+
+            Vector3 slicePos = new Vector3(at.x, hit.point.y + 0.06f, at.z);
+
+            if (hasPrev)
+            {
+                Vector3 mid = (slicePos + prevPos) * 0.5f;
+                float span = Vector3.Distance(slicePos, prevPos);
+                if (span > 0.01f)
+                {
+                    GameObject quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                    quad.name = "StartLineSlice";
+                    quad.transform.SetParent(root.transform, false);
+                    quad.transform.position = mid;
+                    // مستوى أفقي: النورمال للأعلى، محور الارتفاع المحلي على اتجاه المسار
+                    quad.transform.rotation = Quaternion.LookRotation(Vector3.up, fwd);
+                    quad.transform.localScale = new Vector3(span, HalfThick * 2f, 1f);
+                    quad.GetComponent<MeshRenderer>().sharedMaterial = mat;
+                    Destroy(quad.GetComponent<Collider>()); // مرئي فقط — بلا مصادم
+                }
+            }
+
+            prevPos = slicePos;
+            hasPrev = true;
+        }
+
+        Debug.Log("[TrackBuilder] v1.8.0: خط بداية مربعات مرئي عند " + center);
     }
 
     // ==================================================================
@@ -510,17 +606,31 @@ public class TrackBuilder : MonoBehaviour
         GameObject terrainGo = InstantiateOvalModule("oval_mod_terrain", OvalColliderMode.Concave);
         if (terrainGo == null) return false;
 
-        // 2) خطوط الطلاء فوق الإسفلت (بلا مصادم) + أضواء الانطلاق العالية (بلا مصادم)
+        Physics.SyncTransforms();
+
+        // 2) مسح الطريق أولاً (قبل الديكور) — نحتاج خلايا الطريق
+        //    لاستبعاد أي مجسّم ديكور يقطع مسار السباق (v1.8.0).
+        if (!ScanOvalRoad(terrainGo))
+        {
+            Renderer tarmac = FindRendererBySubstring(terrainGo.transform, "TARMAC");
+            ovalRoadBounds = tarmac != null ? tarmac.bounds : new Bounds(MapCenter, new Vector3(228f, 1f, 110f));
+            StartPosition = new Vector3(ovalRoadBounds.center.x, 1.0f, ovalRoadBounds.min.z + 5f);
+            StartYaw = 90f; // احتياطي: شرقاً على أدنى مستقيم — يُضبط نهائياً من الخط إن وجد
+        }
+
+        // 3) خطوط الطلاء فوق الإسفلت (بلا مصادم) + أضواء الانطلاق (بلا مصادم)
         InstantiateOvalModule("oval_mod_lines", OvalColliderMode.None);
         InstantiateOvalModule("oval_mod_startlights", OvalColliderMode.None);
 
-        // 3) الديكور — v1.7.0: مصادمات فقط لما هو بعيد عن الطريق (مبانٍ/مدرّجات/خيام).
-        // pitwall/جسور/لافتات/إطارات/صناديق/أعمدة: بلا مصادمات — قبابها المحدبة كانت
-        // تعترض الطريق (جسر فوق المسار = صندوق صلب يحجبه!) فترمي السيارات (تطير/تغوص)
-        // + طلب المستخدم الدائم: لا حواجز قرب المسار.
-        InstantiateOvalModule("oval_mod_buildings",   OvalColliderMode.Convex);
-        InstantiateOvalModule("oval_mod_seats",       OvalColliderMode.Convex);
-        InstantiateOvalModule("oval_mod_tents",       OvalColliderMode.Convex);
+        // 4) الديكور — v1.8.0: بلا مصادمات إطلاقاً + إسقاط ما يقطع الطريق.
+        //    الجذر الحقيقي لـ «تطير/تغوص/تتكدس» منذ v1.5.0: مدرّجان في وحدة المقاعد
+        //    يقفان فوق أسفلت السباق (grandstands_small_014 على المستقيم الشرقي،
+        //    grandstands_large_011 على المنحنى الشرقي) بمصادمات CONVEX = جدران
+        //    شفافة تتفتت الحقل كل لفة وتدفع السيارات تحت شبكة الطريق. حتى الأصلي
+        //    البعيد صار بلا مصادم: لا جدران غير مرئية أبداً (طلب المستخدم الدائم).
+        InstantiateOvalModuleCullRoad("oval_mod_buildings");
+        InstantiateOvalModuleCullRoad("oval_mod_seats");
+        InstantiateOvalModuleCullRoad("oval_mod_tents");
         InstantiateOvalModule("oval_mod_pitwall",     OvalColliderMode.None);
         InstantiateOvalModule("oval_mod_lamps",       OvalColliderMode.None);
         InstantiateOvalModule("oval_mod_tyres",       OvalColliderMode.None);
@@ -531,24 +641,58 @@ public class TrackBuilder : MonoBehaviour
 
         // بلا حواجز بطلب المستخدم: barriers/walls/trees لا تُستنسخ إطلاقاً
 
-        Physics.SyncTransforms();
-
-        // 4) أبعاد الكاميرا من حدود الأرضية الكاملة
+        // 5) أبعاد الكاميرا من حدود الأرضية الكاملة
         Bounds tb = RenderersBounds(terrainGo.transform);
         MapWidthUnits = Mathf.Max(60f, tb.size.x);
         MapHeightUnits = Mathf.Max(60f, tb.size.z);
         MapCenter = new Vector3(tb.center.x, 0f, tb.center.z);
 
-        // 5) مسح الطريق → الانطلاق (البوابات تُبنى لاحقاً من خط السباق في AlignOvalStartAndGates)
-        if (!ScanOvalRoad(terrainGo))
+        return true;
+    }
+
+    /// <summary>
+    /// v1.8.0 — استنساخ وحدة ديكور بلا مصادمات مع إسقاط أي مجسّم فرعي
+    /// تداخل بصمته الأفقية مع خلايا الطريق الممسوحة (ovalRoadCells).
+    /// يحل جذرياً «مدرّج على الأسفلت» دون مسّ بقيّة الديكور.
+    /// </summary>
+    void InstantiateOvalModuleCullRoad(string name)
+    {
+        GameObject go = InstantiateOvalModule(name, OvalColliderMode.None);
+        if (go == null || ovalRoadCells.Count == 0) return;
+
+        int culled = 0;
+        foreach (MeshFilter mf in go.GetComponentsInChildren<MeshFilter>())
         {
-            Renderer tarmac = FindRendererBySubstring(terrainGo.transform, "TARMAC");
-            ovalRoadBounds = tarmac != null ? tarmac.bounds : new Bounds(MapCenter, new Vector3(228f, 1f, 110f));
-            StartPosition = new Vector3(ovalRoadBounds.center.x, 1.0f, ovalRoadBounds.min.z + 5f);
-            StartYaw = 90f; // احتياطي: شرقاً على أدنى مستقيم — يُضبط نهائياً من الخط إن وجد
+            Renderer r = mf.GetComponent<Renderer>();
+            if (r == null) continue;
+
+            Bounds b = r.bounds; // حدود عالمية (بعد التكبير ×1.5)
+            if (FootprintHitsRoad(b)) { Destroy(mf.gameObject); culled++; }
         }
 
-        return true;
+        if (culled > 0)
+            Debug.Log($"[TrackBuilder] v1.8.0: أُسقط {culled} مجسّم ديكور يقطع الطريق من '{name}'");
+    }
+
+    /// <summary>هل البصمة الأفقية لصندوق المجسّم تلمس خلايا الطريق (بهامش 3م)؟</summary>
+    bool FootprintHitsRoad(Bounds b)
+    {
+        const float Margin = 3f;
+        float minX = b.min.x - Margin, maxX = b.max.x + Margin;
+        float minZ = b.min.z - Margin, maxZ = b.max.z + Margin;
+
+        // عيّنة كل ~2م (مطابقة لخطوة المسح) — مجسّم 50م = ~676 عينة رخيصة
+        for (float x = minX; x <= maxX; x += ovalScanStep)
+        {
+            for (float z = minZ; z <= maxZ; z += ovalScanStep)
+            {
+                long key = OvalCellKey(
+                    Mathf.FloorToInt(x / ovalScanStep),
+                    Mathf.FloorToInt(z / ovalScanStep));
+                if (ovalRoadCells.Contains(key)) return true;
+            }
+        }
+        return false;
     }
 
     GameObject InstantiateOvalModule(string name, OvalColliderMode mode)
