@@ -617,6 +617,26 @@ public class TrackBuilder : MonoBehaviour
             StartPosition = new Vector3(ovalRoadBounds.center.x, 1.0f, ovalRoadBounds.min.z + 5f);
             StartYaw = 90f; // احتياطي: شرقاً على أدنى مستقيم — يُضبط نهائياً من الخط إن وجد
         }
+        else
+        {
+            // v1.9.0 — علاج جذري لـ «الخروج من الحلبة = الغوص في الأرض»:
+            // داخل الحلبة كامل (حول الجزيرة) توجد مناطق بلا أي سطح (فجوات شبكة
+            // التضاريس الأصل) تنتهي بقاع صخري على عمق -200..-360م — أي خروج
+            // من الإسفلت نحوها = سقوط حرفي داخل الأرض. الملء بالأشعة (أدناه)
+            // يبني أرضية عشب صلبة فوق كل فجوة يكتشفها بنفسه فتستقيم الدائرة.
+            BuildAbyssFiller();
+        }
+
+        // v1.9.0 — أرضية أمان عالمية (آخر خط دفاع): توصف أي سقوط خارج حدود
+        // العالم أو من ثغرة غير متوقعة على عمق -25م، وفحص الإنقاذ في
+        // CarController (أدنى من -12م) يعيد السيارة لخط السباق فوراً.
+        GameObject floor = new GameObject("WorldSafetyFloor");
+        floor.transform.SetParent(transform, false);
+        BoxCollider floorCol = floor.AddComponent<BoxCollider>();
+        floorCol.center = new Vector3(0f, -25.5f, 125f);
+        floorCol.size = new Vector3(1900f, 1f, 1200f);
+        floorCol.isTrigger = false;
+        floor.layer = TrackLayer;
 
         // 3) خطوط الطلاء فوق الإسفلت (بلا مصادم) + أضواء الانطلاق (بلا مصادم)
         InstantiateOvalModule("oval_mod_lines", OvalColliderMode.None);
@@ -695,6 +715,110 @@ public class TrackBuilder : MonoBehaviour
         return false;
     }
 
+    // ================= ملء فجوات التضاريس (v1.9.0) =================
+
+    /// <summary>
+    /// v1.9.0 — علاج «الخروج من الحلبة = الغوص في الأرض» من جذوره:
+    /// شبكة تضاريس الأصل الأصلي بها فجوات حقيقية داخل الحلبة (حول الجزيرة
+    /// وجنوبها وشرقها) — أشعة نازلة من فوقها لا تصيب أي سطح حتى قاع صخري
+    /// مدفون على عمق -200..-360م (مجسّم underground)، فأي سيارة تغادر
+    /// الإسفلت نحوها تسقط حرفياً داخل الأرض.
+    /// العلاج: مسح شبكي ذاتي (8م) فوق كامل نطاق الحلبة — كل خلية يكون
+    /// أعلى سطح فيها «أرض الأمان العميقة» أو لا سطح إطلاقاً = خلية فجوة،
+    /// تُبنى لها بلاطة أرضية (عشب + مصادم شبكي مقعّر) في شبكة واحدة
+    /// مدمجة بمجسّم واحد. الخلايا السليمة (إسفلت/عشب/حصى/رمل) تُتخطى
+    /// تلقائياً فلا تلمس الملء أسطحاً قانونية أبداً.
+    /// </summary>
+    void BuildAbyssFiller()
+    {
+        EnsureOvalMaterials();
+
+        const float Cell = 8f;
+        const float Y = 0f;          // ارتفاع الملء = سطح القاعدة (الطرق القانونية 0..7م فوقه لا تحته)
+        const float RayTop = 150f;   // بداية الأشعة فوق أعلى تلّ (77م)
+        const float RayDepth = 400f; // تغطي القاع الصخري حتى -250م
+        const float AbyssBelow = -15f; // كل سطح أدنى من هذا = قاع الفجوة (لا سطح حقيقي)
+
+        float minX = ovalRoadBounds.min.x - 40f;
+        float maxX = ovalRoadBounds.max.x + 40f;
+        float minZ = ovalRoadBounds.min.z - 40f;
+        float maxZ = ovalRoadBounds.max.z + 40f;
+
+        var verts = new List<Vector3>(4096);
+        var tris = new List<int>(8192);
+        var uvs = new List<Vector2>(4096);
+        int cells = 0;
+        int mask = 1 << TrackLayer;
+
+        for (float x = minX; x < maxX; x += Cell)
+        {
+            for (float z = minZ; z < maxZ; z += Cell)
+            {
+                float cx = x + Cell * 0.5f;
+                float cz = z + Cell * 0.5f;
+
+                if (Physics.Raycast(new Vector3(cx, RayTop, cz), Vector3.down,
+                                   out RaycastHit hit, RayDepth, mask) &&
+                    hit.point.y > AbyssBelow)
+                    continue; // سطح قانوني (إسفلت/عشب/حصى/رمل) — لا ملء
+
+                // بلاطة 8×8 عند سطح القاعدة (رؤوس مع اتجاه مزدوج عبر مثلثين)
+                int b = verts.Count;
+                verts.Add(new Vector3(x, Y, z));
+                verts.Add(new Vector3(x + Cell, Y, z));
+                verts.Add(new Vector3(x + Cell, Y, z + Cell));
+                verts.Add(new Vector3(x, Y, z + Cell));
+                // وجه علوي
+                tris.Add(b); tris.Add(b + 2); tris.Add(b + 1);
+                tris.Add(b); tris.Add(b + 3); tris.Add(b + 2);
+                // وجه سفلي (لأشعة من الأسفل إن حدثت)
+                tris.Add(b); tris.Add(b + 1); tris.Add(b + 2);
+                tris.Add(b); tris.Add(b + 2); tris.Add(b + 3);
+                float u0 = x / 15f, v0 = z / 15f, u1 = (x + Cell) / 15f, v1 = (z + Cell) / 15f;
+                uvs.Add(new Vector2(u0, v0));
+                uvs.Add(new Vector2(u1, v0));
+                uvs.Add(new Vector2(u1, v1));
+                uvs.Add(new Vector2(u0, v1));
+                cells++;
+            }
+        }
+
+        if (cells == 0)
+        {
+            Debug.Log("[TrackBuilder] v1.9.0: لا فجوات تضاريس — لا حاجة لملء");
+            return;
+        }
+
+        Mesh mesh = new Mesh
+        {
+            name = "AbyssFiller",
+            indexFormat = cells > 16384
+                ? UnityEngine.Rendering.IndexFormat.UInt32
+                : UnityEngine.Rendering.IndexFormat.UInt16
+        };
+        mesh.SetVertices(verts);
+        mesh.SetUVs(0, uvs);
+        mesh.SetTriangles(tris, 0);
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+
+        GameObject go = new GameObject("AbyssFiller");
+        go.transform.SetParent(transform, false);
+        MeshFilter mf = go.AddComponent<MeshFilter>();
+        mf.sharedMesh = mesh;
+        MeshRenderer mr = go.AddComponent<MeshRenderer>();
+        mr.sharedMaterial = ovalMatGrass != null ? ovalMatGrass : ovalMatRock;
+        mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        MeshCollider col = go.AddComponent<MeshCollider>();
+        col.sharedMesh = mesh;
+        col.convex = false; // مقعّر: أسطح مسطحة فقط وأدق دقة
+        go.layer = TrackLayer;
+
+        Physics.SyncTransforms(); // الخبز قبل أي أشعة لاحقة (خط البداية/الإنقاذ)
+
+        Debug.Log($"[TrackBuilder] v1.9.0: مُلئت {cells} فجوة تضاريس (شبكة 8م) — لا غوص بعد اليوم");
+    }
+
     GameObject InstantiateOvalModule(string name, OvalColliderMode mode)
     {
         GameObject prefab = Resources.Load<GameObject>(TrackRes + name);
@@ -718,6 +842,12 @@ public class TrackBuilder : MonoBehaviour
             foreach (MeshFilter mf in go.GetComponentsInChildren<MeshFilter>())
             {
                 if (mf.sharedMesh == null) continue;
+
+                // v1.9.0: Plane001 (خلفية الجبال البعيدة) يخترق مستقيم الجنوب —
+                // مجسّم مشهدٍ بعيد لا سطح قيادة: بلا مصادم حتى لا يصبح جداراً خفياً
+                string mn = mf.name.ToUpperInvariant();
+                if (mn.Contains("PLANE")) continue;
+
                 MeshCollider col = mf.gameObject.AddComponent<MeshCollider>();
                 col.sharedMesh = mf.sharedMesh;
                 col.convex = (mode == OvalColliderMode.Convex);
@@ -1137,11 +1267,20 @@ public class TrackBuilder : MonoBehaviour
             if (d < best) { best = d; startIdx = i; }
         }
 
+        // v1.9.0 — عكس اتجاه الدوران إلى مع عقارب الساعة (مع إبقاء الفهرس 0
+        // عند نقطة الانطلاق): ترتيب الدلاء بالزاوية المتزايدة يعطي عكس عقارب
+        // الساعة (غرباً على المستقيم الشمالي) فكانت السيارة تنطلق «للخلف»
+        // من جهة الـ pitlane ومخرج الجراجات (الفوة الخرسانية شرقه). السير
+        // بالقائمة عكسياً انطلاقاً من أقرب نقطة للانطلاق يجعل الاتجاه شرقاً
+        // (+90) — جهة الفوة/pit exit والاتجاه الذي اعتادته النسخ السابقة —
+        // وكل الأنظمة (البوابات/الشبكة/الذكاء) تتبع الخط تلقائياً.
         var rotated = new List<Vector3>(smooth.Count);
-        for (int i = 0; i < smooth.Count; i++) rotated.Add(smooth[(startIdx + i) % smooth.Count]);
+        for (int i = 0; i < smooth.Count; i++)
+            rotated.Add(smooth[(startIdx - i + smooth.Count) % smooth.Count]);
+
         RacingLine = rotated.ToArray();
 
-        Debug.Log($"[TrackBuilder] خط السباق البيضاوي جاهز: {RacingLine.Length} نقطة");
+        Debug.Log($"[TrackBuilder] خط السباق البيضاوي جاهز (مع عقارب الساعة v1.9.0): {RacingLine.Length} نقطة");
     }
 
     static Bounds RenderersBounds(Transform t)
