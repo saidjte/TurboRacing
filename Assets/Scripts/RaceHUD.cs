@@ -181,12 +181,26 @@ public class RaceHUD : MonoBehaviour
             lineD = Mathf.Sqrt(best);
         }
 
-        // (v2.2.0) السطر الثالث: مصدر خط السباق + حالة المدخلات الحية + السرعة
-        // — من أي لقطة نعرف فوراً: هل الخط مخبوز؟ هل وصل ضغط البنزين للفيزياء؟
+        // (v2.3.0) السطر الثالث الموسّع: مصدر خط السباق + السرعة + المدخلات المركّبة
+        // + قناتا الإدخال (E=مسار EventSystem / T=الأصابع الفيزيائية) + عدد الأزرار
+        // المربوطة + العجلات الملامسة — من أي لقطة نعرف فوراً أين انقطعت السلسلة:
+        //   b2/4  → ربط ناقص (زر لم يُعثر عليه)
+        //   E+ T0 → حدث وصل بلا لمس فيزيائي (خلل InputModule)
+        //   T2 G- → لمس موجود والزر لا يستقبله (حجب raycast) ← الاستقصاء المباشر يعالجه
+        //   w0/4  → السيارة معلّقة في الهواء/غارقة في الهندسة (مشكلة فيزياء لا إدخال)
         float spd = carCtrl != null ? carCtrl.SpeedKmh : 0f;
-        string inp = carCtrl != null
-            ? $"G{(carCtrl.DebugGasHeld ? "+" : "-")} S{(carCtrl.DebugSteer > 0f ? "+" : carCtrl.DebugSteer < 0f ? "-" : "0")} B{(carCtrl.DebugBrakeHeld ? "+" : "-")}"
-            : "?";
+        string inp;
+        if (carCtrl != null)
+        {
+            string g = carCtrl.DebugGasHeld ? "+" : "-";
+            string s = carCtrl.DebugSteer > 0f ? "+" : carCtrl.DebugSteer < 0f ? "-" : "0";
+            string b = carCtrl.DebugBrakeHeld ? "+" : "-";
+            string e = carCtrl.DebugEventGas ? "+" : "-";
+            string t = carCtrl.DebugTouchGas ? "+" : "-";
+            inp = $"G{g} S{s} B{b}  E{e} t{t} T{carCtrl.DebugTouchCount} " +
+                  $"b{carCtrl.DebugBoundButtons}/4 w{carCtrl.DebugGroundedWheels}/4";
+        }
+        else inp = "?";
         string src = TrackBuilder.LineSourceTag;
 
         dbgText.text = $"X {p.x:0.#}  Y {p.y:0.#}  Z {p.z:0.#}\n" +

@@ -26,10 +26,21 @@ using UnityEngine.UI;
 public class CarController : MonoBehaviour
 {
     // --- إدخال اللاعب ---
+    // (v2.3.0) holdingX = النتيجة المُركَّبة كل إطار من ثلاث قنوات مستقلة:
+    //   1) evtX  : مسار EventTrigger عبر EventSystem (كما كان تاريخياً)
+    //   2) touchX: استقصاء مباشر لـ Input.touches على مستطيلات الأزرار —
+    //      يتجاوز EventSystem كلياً فيعالج صمتاً أي انقطاع في الواجهة
+    //      (حجب raycast / عدم تطابق pointerId / خلل InputModule)
+    //   3) لوحة المفاتيح (محرر فقط)
     private bool holdingLeft;
     private bool holdingRight;
     private bool holdingBrake;
     private bool holdingGas;   // v1.2.0: القيادة اليدوية
+    private bool evtLeft, evtRight, evtBrake, evtGas;
+    private bool touchLeft, touchRight, touchBrake, touchGas;
+    private float bindRetryAt;          // (v2.3.0) موعد إعادة محاولة الربط
+    private int boundButtons;           // (v2.3.0) عدد الأزرار المربوطة فعلاً
+    private readonly Dictionary<string, RectTransform> btnRects = new Dictionary<string, RectTransform>();
 
     // --- تتبع اللمس لكل زر (v0.6.8 كما هو) ---
     private readonly Dictionary<string, HashSet<int>> holdPointers = new Dictionary<string, HashSet<int>>();
@@ -99,6 +110,13 @@ public class CarController : MonoBehaviour
     public bool DebugGasHeld => holdingGas;
     public bool DebugBrakeHeld => holdingBrake;
     public float DebugSteer => (holdingLeft ? -1f : 0f) + (holdingRight ? 1f : 0f);
+
+    /// <summary>(v2.3.0) تشخيص القنوات: أي مسار يستلم الضغط فعلاً؟</summary>
+    public bool DebugEventGas => evtGas;                    // مسار EventSystem
+    public bool DebugTouchGas => touchGas;                  // مسار الاستقصاء المباشر
+    public int DebugBoundButtons => boundButtons;           // الأزرار المربوطة n/4
+    public int DebugTouchCount => Input.touchCount;         // عدد الأصابع الفيزيائي
+    public int DebugGroundedWheels { get; private set; }    // عجلات ملامسة للأرض x/4
     /// <summary>مُصدِّر مادة الطلاء (يستخدمه SurfaceChecker للتلطيخ على العشب).</summary>
     public MeshRenderer PaintRenderer => paintRenderer;
 
@@ -154,10 +172,12 @@ public class CarController : MonoBehaviour
         }
 
         // ربط الأزرار اللمسية تلقائياً بالاسم
-        BindHoldButton("BtnLeft",  down => holdingLeft  = down);
-        BindHoldButton("BtnRight", down => holdingRight = down);
-        BindHoldButton("BtnBrake", down => holdingBrake = down);
-        BindHoldButton("BtnGas",   down => holdingGas   = down);
+        // (v2.3.0) ربط الأحداث يقترح evtX فقط — الحقل المركّب holdingX
+        // يُحسب كل إطار في SynthesizeInputs من القنوات الثلاث
+        BindHoldButton("BtnLeft",  down => evtLeft  = down);
+        BindHoldButton("BtnRight", down => evtRight = down);
+        BindHoldButton("BtnBrake", down => evtBrake = down);
+        BindHoldButton("BtnGas",   down => evtGas   = down);
 
         ConfigureSteerIcon("BtnLeft",  pointRight: false);
         ConfigureSteerIcon("BtnRight", pointRight: true);
@@ -587,29 +607,108 @@ public class CarController : MonoBehaviour
 
     void Update()
     {
-        // احتياطي للتجربة داخل المحرر فقط
-#if UNITY_EDITOR || UNITY_STANDALONE
-        if (Input.GetKeyDown(KeyCode.LeftArrow)  || Input.GetKeyDown(KeyCode.A)) holdingLeft  = true;
-        if (Input.GetKeyUp(KeyCode.LeftArrow)    || Input.GetKeyUp(KeyCode.A))   holdingLeft  = false;
-        if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D)) holdingRight = true;
-        if (Input.GetKeyUp(KeyCode.RightArrow)   || Input.GetKeyUp(KeyCode.D))   holdingRight = false;
-        if (Input.GetKeyDown(KeyCode.Space)      || Input.GetKeyDown(KeyCode.S)) holdingBrake = true;
-        if (Input.GetKeyUp(KeyCode.Space)        || Input.GetKeyUp(KeyCode.S))   holdingBrake = false;
-        if (Input.GetKeyDown(KeyCode.UpArrow)    || Input.GetKeyDown(KeyCode.W)) holdingGas   = true;
-        if (Input.GetKeyUp(KeyCode.UpArrow)      || Input.GetKeyUp(KeyCode.W))   holdingGas   = false;
-#endif
+        // (v2.3.0) حلقة الإدخال المركّبة: إعادة ربط ناقص + استقصاء اللمس + تركيب القنوات
+        TryBindPendingButtons();
+        PollTouchFallback();
+        SynthesizeInputs();
 
         // قسر تحرير الأزرار العالقة (v0.6.8)
         PruneStalePointers();
     }
 
+    /// <summary>(v2.3.0) إعادة محاولة ربط أي زر لم يُعثر عليه عند Start
+    /// (حماية من أي فرق في ترتيب الإنشاء بين الأجهزة).</summary>
+    void TryBindPendingButtons()
+    {
+        if (pendingBinds.Count == 0) return;
+        if (Time.unscaledTime < bindRetryAt) return;
+        bindRetryAt = Time.unscaledTime + 0.5f;
+
+        for (int i = pendingBinds.Count - 1; i >= 0; i--)
+        {
+            if (TryBindHoldButton(pendingBinds[i], pendingCallbacks[i]))
+            {
+                pendingBinds.RemoveAt(i);
+                pendingCallbacks.RemoveAt(i);
+            }
+        }
+    }
+
+    readonly List<string> pendingBinds = new List<string>();
+    readonly List<System.Action<bool>> pendingCallbacks = new List<System.Action<bool>>();
+
+    /// <summary>(v2.3.0) استقصاء اللمس المباشر: قناة إدخال مستقلة كلياً عن
+    /// EventSystem — كل إصبع فيزيائي يُختبر على مستطيلات الأزرار الأربعة.
+    /// لا تتأثر بحجب raycast ولا بنظام أحداث الواجهة إطلاقاً.</summary>
+    void PollTouchFallback()
+    {
+        touchLeft = touchRight = touchBrake = touchGas = false;
+
+        int n = Input.touchCount;
+        for (int i = 0; i < n; i++)
+        {
+            Touch t = Input.GetTouch(i);
+            if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled) continue;
+
+            Vector2 sp = t.position;
+            if (HitButton("BtnGas",   sp)) touchGas   = true;
+            if (HitButton("BtnBrake", sp)) touchBrake = true;
+            if (HitButton("BtnLeft",  sp)) touchLeft  = true;
+            if (HitButton("BtnRight", sp)) touchRight = true;
+        }
+    }
+
+    /// <summary>هل النقطة (بإحداثيات الشاشة) داخل مستطيل الزر؟
+    /// كانفاس ScreenSpaceOverlay الكاميرا المرجعية = null.</summary>
+    bool HitButton(string buttonName, Vector2 screenPos)
+    {
+        RectTransform rt = CachedButtonRect(buttonName);
+        return rt != null &&
+               RectTransformUtility.RectangleContainsScreenPoint(rt, screenPos, null);
+    }
+
+    RectTransform CachedButtonRect(string buttonName)
+    {
+        RectTransform rt;
+        if (btnRects.TryGetValue(buttonName, out rt) && rt != null) return rt;
+
+        GameObject go = GameObject.Find(buttonName);
+        rt = go != null ? go.GetComponent<RectTransform>() : null;
+        btnRects[buttonName] = rt;
+        return rt;
+    }
+
+    /// <summary>(v2.3.0) تركيب المدخلات النهائي من القنوات الثلاث + تغذية بصرية موحّدة.</summary>
+    void SynthesizeInputs()
+    {
+        bool keyLeft = false, keyRight = false, keyBrake = false, keyGas = false;
+#if UNITY_EDITOR || UNITY_STANDALONE
+        keyLeft  = Input.GetKey(KeyCode.LeftArrow)  || Input.GetKey(KeyCode.A);
+        keyRight = Input.GetKey(KeyCode.RightArrow) || Input.GetKey(KeyCode.D);
+        keyBrake = Input.GetKey(KeyCode.Space)      || Input.GetKey(KeyCode.S);
+        keyGas   = Input.GetKey(KeyCode.UpArrow)    || Input.GetKey(KeyCode.W);
+#endif
+
+        holdingLeft  = evtLeft  || touchLeft  || keyLeft;
+        holdingRight = evtRight || touchRight || keyRight;
+        holdingBrake = evtBrake || touchBrake || keyBrake;
+        holdingGas   = evtGas   || touchGas   || keyGas;
+
+        // التغذية البصرية تتبع الحالة المركّبة (أي قناة تضغط = إضاءة)
+        SetPressedVisual("BtnLeft",  holdingLeft);
+        SetPressedVisual("BtnRight", holdingRight);
+        SetPressedVisual("BtnBrake", holdingBrake);
+        SetPressedVisual("BtnGas",   holdingGas);
+    }
+
     void FixedUpdate()
     {
         // الإدخال يصل للمتحكم عبر خاصية CurrentCarInput (يقرؤها MotionCore كل خطوة).
-        // هذه الحلقة للمؤثرات والإنقاذ الذاتي فقط.
+        // هذه الحلقة للمؤثرات والإنقاذ الذاتي فقط + (v2.3.0) تشخيص التماس.
         UpdateDriftEffects();
         CheckFlipRecovery();
         CheckFallRecovery();
+        UpdateGroundedWheels();
     }
 
     float ForwardSpeed()
@@ -800,13 +899,23 @@ public class CarController : MonoBehaviour
 
     void BindHoldButton(string buttonName, System.Action<bool> onStateChanged)
     {
-        GameObject buttonGO = GameObject.Find(buttonName);
-
-        if (buttonGO == null)
+        // (v2.3.0) الفشل لم يعد نهائياً: يُسجَّل في قائمة الانتظار وتُعاد المحاولة كل 0.5ث
+        if (!TryBindHoldButton(buttonName, onStateChanged))
         {
-            Debug.LogWarning($"[CarController] لم أجد زراً باسم '{buttonName}' في المشهد - تخطيت ربطه.");
-            return;
+            if (!pendingBinds.Contains(buttonName))
+            {
+                pendingBinds.Add(buttonName);
+                pendingCallbacks.Add(onStateChanged);
+            }
+            Debug.LogWarning($"[CarController] زر '{buttonName}' غير موجود الآن — أُجّل ربطه (إعادة محاولة كل 0.5ث).");
         }
+    }
+
+    /// <summary>(v2.3.0) فصل منطق الربط عن البحث ليصبح قابلاً لإعادة المحاولة.</summary>
+    bool TryBindHoldButton(string buttonName, System.Action<bool> onStateChanged)
+    {
+        GameObject buttonGO = GameObject.Find(buttonName);
+        if (buttonGO == null) return false;
 
         holdPointers[buttonName] = new HashSet<int>();
         holdEngaged[buttonName] = false;
@@ -819,6 +928,19 @@ public class CarController : MonoBehaviour
         AddTriggerEntry(trigger, EventTriggerType.PointerUp,   ed => OnHoldPointer(buttonName, ed, false));
         AddTriggerEntry(trigger, EventTriggerType.PointerExit, ed => OnHoldPointer(buttonName, ed, false));
         AddTriggerEntry(trigger, EventTriggerType.PointerEnter, ed => OnHoldPointer(buttonName, ed, true));
+
+        boundButtons = holdCallbacks.Count;
+        return true;
+    }
+
+    /// <summary>(v2.3.0) إحصاء العجلات الملامسة للأرض — يكشف في اللقطة إن كانت
+    /// السيارة واقفة على مصادم صلب أم معلّقة/غارقة داخل الهندسة.</summary>
+    void UpdateGroundedWheels()
+    {
+        int g = 0;
+        for (int i = 0; i < 4; i++)
+            if (wheels[i] != null && wheels[i].isGrounded) g++;
+        DebugGroundedWheels = g;
     }
 
     void OnHoldPointer(string buttonName, BaseEventData eventData, bool pressed)
@@ -963,6 +1085,8 @@ public class CarController : MonoBehaviour
     public void ResetInput()
     {
         holdingLeft = holdingRight = holdingBrake = holdingGas = false;
+        evtLeft = evtRight = evtBrake = evtGas = false;         // (v2.3.0)
+        touchLeft = touchRight = touchBrake = touchGas = false; // (v2.3.0)
         aiInput = default;
         mc.ExternalSpeedCapKph = 0f;
 
