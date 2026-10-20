@@ -646,7 +646,8 @@ public class TrackBuilder : MonoBehaviour
 
         // 3) خطوط الطلاء فوق الإسفلت (بلا مصادم) + أضواء الانطلاق (بلا مصادم)
         InstantiateOvalModule("oval_mod_lines", OvalColliderMode.None);
-        ovalStartLights = InstantiateOvalModule("oval_mod_startlights", OvalColliderMode.None); // v2.0.0: مرجع بوابة الانطلاق الحقيقية
+        GameObject startLightsGo = InstantiateOvalModule("oval_mod_startlights", OvalColliderMode.None); // v2.0.0: مرجع بوابة الانطلاق الحقيقية
+        ovalStartLights = startLightsGo != null ? startLightsGo.transform : null;
 
         // 4) الديكور — v1.8.0: بلا مصادمات إطلاقاً + إسقاط ما يقطع الطريق.
         //    الجذر الحقيقي لـ «تطير/تغوص/تتكدس» منذ v1.5.0: مدرّجان في وحدة المقاعد
