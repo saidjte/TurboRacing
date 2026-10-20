@@ -28,6 +28,15 @@ public class RaceHUD : MonoBehaviour
     Transform carTr;
     CarController carCtrl;
 
+    // (v2.6.0) خريطة الحلبة الحية — ميزة بأسلوب Racing Starter Kit
+    UnityEngine.UI.RawImage mapImg;
+    Texture2D mapTex;
+    Color[] mapBg;
+    bool mapReady;
+    float mapNext;
+    const int MapRes = 256;
+    float mapOriginX, mapOriginZ, mapScale;
+
     void Awake()
     {
         Instance = this;
@@ -36,7 +45,108 @@ public class RaceHUD : MonoBehaviour
     void Start()
     {
         BuildCanvas();
+        BuildMapTexture();
         canvasGO.SetActive(false); // RaceFlow سيظهره عند بدء السباق
+    }
+
+    // ================= خريطة الحلبة الحية (v2.6.0) =================
+
+    /// <summary>بناء خريطة الحلبة مرة واحدة من خط السباق المخبوز: خلفية داكنة
+    /// نصف شفافة + شريط طريق بعرضه الحقيقي بحدود داكنة + مؤشر بداية كهرماني.
+    /// التحديث afterwards = نقطة اللاعب فقط (نسخ + ختم + Apply بمعدل 8Hz).</summary>
+    void BuildMapTexture()
+    {
+        TrackBuilder tb = TrackBuilder.Instance;
+        if (tb == null || tb.RacingLine == null || tb.RacingLine.Length < 12)
+        {
+            if (mapImg != null) mapImg.gameObject.SetActive(false);
+            return;
+        }
+
+        Vector3[] dense = TrackStyle.ResampleClosed(tb.RacingLine, 3f, out _);
+
+        float minX = float.MaxValue, maxX = float.MinValue;
+        float minZ = float.MaxValue, maxZ = float.MinValue;
+        foreach (Vector3 p in dense)
+        {
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.z < minZ) minZ = p.z;
+            if (p.z > maxZ) maxZ = p.z;
+        }
+        const float Margin = 12f;
+        float w = Mathf.Max(1f, maxX - minX + Margin * 2f);
+        float h = Mathf.Max(1f, maxZ - minZ + Margin * 2f);
+        mapScale = Mathf.Min((MapRes - 10f) / w, (MapRes - 10f) / h);
+        mapOriginX = (minX + maxX) * 0.5f;
+        mapOriginZ = (minZ + maxZ) * 0.5f;
+
+        var px = new Color[MapRes * MapRes];
+        Color bg = new Color(0.05f, 0.06f, 0.09f, 0.62f);
+        for (int i = 0; i < px.Length; i++) px[i] = bg;
+
+        // عرض الطريق الحقيقي على الخريطة (نصف العرض المقيس ≈ 11م)
+        float roadR = 11f * mapScale;
+        Color outline = new Color(0f, 0f, 0f, 0.78f);
+        Color asphalt = new Color(0.55f, 0.58f, 0.62f, 0.95f);
+        foreach (Vector3 p in dense)
+            StampDisc(px, WorldToMap(p), roadR + 2.2f, outline);
+        foreach (Vector3 p in dense)
+            StampDisc(px, WorldToMap(p), roadR, asphalt);
+
+        // مؤشر خط البداية/النهاية
+        StampDisc(px, WorldToMap(tb.RacingLine[0]), 4.5f, UiKit.Amber);
+
+        mapBg = px;
+        mapTex = new Texture2D(MapRes, MapRes, TextureFormat.RGBA32, false);
+        mapTex.filterMode = FilterMode.Bilinear;
+        mapTex.SetPixels(px);
+        mapTex.Apply(false, false);
+        if (mapImg != null) mapImg.texture = mapTex;
+        mapReady = true;
+    }
+
+    Vector2 WorldToMap(Vector3 p)
+    {
+        return new Vector2((p.x - mapOriginX) * mapScale + MapRes * 0.5f,
+                           (p.z - mapOriginZ) * mapScale + MapRes * 0.5f);
+    }
+
+    static void StampDisc(Color[] px, Vector2 c, float r, Color col)
+    {
+        int cx = Mathf.RoundToInt(c.x), cy = Mathf.RoundToInt(c.y);
+        int ri = Mathf.CeilToInt(r);
+        float r2 = r * r;
+        for (int dy = -ri; dy <= ri; dy++)
+        {
+            for (int dx = -ri; dx <= ri; dx++)
+            {
+                if (dx * dx + dy * dy > r2) continue;
+                int x = cx + dx, y = cy + dy;
+                if (x < 0 || y < 0 || x >= MapRes || y >= MapRes) continue;
+                px[y * MapRes + x] = col;
+            }
+        }
+    }
+
+    /// <summary>تحديث نقطة اللاعب على الخريطة (8Hz كافٍ ويوفر البطارية).</summary>
+    void UpdateMap()
+    {
+        if (!mapReady || Time.unscaledTime < mapNext) return;
+        mapNext = Time.unscaledTime + 0.12f;
+        if (carTr == null)
+        {
+            GameObject c = GameObject.Find("Car");
+            if (c != null) carTr = c.transform;
+            if (carTr == null) return;
+        }
+
+        var px = (Color[])mapBg.Clone();
+        Vector2 m = WorldToMap(carTr.position);
+        StampDisc(px, m, 5.2f, UiKit.Amber);
+        StampDisc(px, m, 2.4f, Color.white);
+        mapTex.SetPixels(px);
+        mapTex.Apply(false, false);
     }
 
     void BuildCanvas()
@@ -89,6 +199,21 @@ public class RaceHUD : MonoBehaviour
             new Vector2(300f, 40f), 26, TextAnchor.LowerRight, new Color(1f, 1f, 1f, 0.55f))
             .text = "v" + GameVersion.Number;
 
+        // (v2.6.0) خريطة الحلبة الحية أسفل اليسار (خارج نطاق أزرار القيادة)
+        GameObject mapGo = new GameObject("MiniMap",
+            typeof(UnityEngine.UI.RawImage));
+        mapGo.transform.SetParent(canvasGO.transform, false);
+        UnityEngine.UI.RawImage raw = mapGo.GetComponent<UnityEngine.UI.RawImage>();
+        mapImg = raw;
+        RectTransform mrt = mapGo.GetComponent<RectTransform>();
+        mrt.anchorMin = new Vector2(0f, 0f);
+        mrt.anchorMax = new Vector2(0f, 0f);
+        mrt.pivot = new Vector2(0f, 0f);
+        mrt.anchoredPosition = new Vector2(28f, 34f);
+        mrt.sizeDelta = new Vector2(230f, 230f);
+        raw.color = new Color(1f, 1f, 1f, 0.9f);
+        raw.raycastTarget = false;
+
         // زر الإيقاف المؤقت (v0.6.6) - أيقونة حقيقية (شريطان أبيضان) مرسومة بالصور
         // أعلى يمين الشاشة — مستقلة تماماً عن الخطوط فتظهر دائماً على كل الأجهزة
         UiKit.MakePauseButton(canvasGO.transform, "BtnPause",
@@ -136,6 +261,7 @@ public class RaceHUD : MonoBehaviour
         bestText.text = "BEST " + UiKit.FormatTime(lm.BestLapTime);
         lastText.text = lm.LastLapTime > 0f ? "LAST " + UiKit.FormatTime(lm.LastLapTime) : "";
 
+        UpdateMap(); // (v2.6.0) نقطة اللاعب على الخريطة الحية
         UpdateDebug();
         if (toastText != null && Time.time > toastUntil && toastText.text.Length > 0)
             toastText.text = "";
