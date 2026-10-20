@@ -143,9 +143,17 @@ public class MotionCoreVehicleController : VehicleControllerBase
     public float ExternalSpeedCapKph { get; set; }
 
     /// <summary>
-    /// منحنى عزم أركيد: عزم كامل حتى 45% من السرعة القصوى ثم ينخفض
-    /// خطياً حتى 35% عند القصوى — تسارع قوي من الوقوف وثبات عالٍ عند السرعة.
-    /// السقف الخارجي (المنافسون) يقطع العزم فوقه.
+    /// منحنى عزم أركيد (v2.4.0 إصلاح جذري «زر البنزين لا يعمل»):
+    /// عقد الأساس (VehicleControllerBase.ApplyDrive) يتعامل مع قيمة هذه الدالة
+    /// كعزم كلي بالنيوتن.متر (فقط) — يقسمه على العجلات المدفوعة دون أي ضرب
+    /// في MaxMotorTorque. الإرجاع السابق كان معاملاً بلا وحدة (0..1) فيصبح
+    /// العزم الفعلي ≤ 1 نيوتن.متر ≈ صفر — بينما فرملة الرجوع تتجاوز هذه الدالة
+    /// وتستخدم maxMotorTorque مباشرة، ولهذا كانت السيارة «تتحرك للخلف فقط»
+    /// منذ v1.5.0 وبدت أزرار القيادة ميتة في كل الإصدارات التالية.
+    /// الإصلاح: ضرب المعامل في MaxMotorTorque (نيوتن.متر الحقيقية).
+    /// المنحنى: عزم كامل حتى 45% من السرعة القصوى ثم ينخفض خطياً حتى 35% —
+    /// تسارع قوي من الوقوف وثبات عالٍ عند السرعة، والسقف الخارجي (المنافسون)
+    /// يقطع العزم فوقه.
     /// </summary>
     protected override float EvaluateMotorTorque(float throttle, float normalizedSpeed)
     {
@@ -155,7 +163,7 @@ public class MotionCoreVehicleController : VehicleControllerBase
         float falloff;
         if (normalizedSpeed < 0.45f) falloff = 1f;
         else falloff = Mathf.Lerp(1f, 0.35f, (normalizedSpeed - 0.45f) / 0.55f);
-        return throttle * falloff;
+        return throttle * falloff * MaxMotorTorque;
     }
 
     /// <summary>عتبة انزلاق مرتفعة قليلاً: دخان/آثار عند انزلاق حقيقي فقط.</summary>
