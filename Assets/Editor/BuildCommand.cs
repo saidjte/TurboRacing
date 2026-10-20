@@ -135,8 +135,11 @@ public static class BuildCommand
 
     /// <summary>
     /// مصدر شيدر TR/Paint: Surface shader يدعم ألوان الرؤوس (COLOR semantic —
-    /// ميزة موثقة في Surface Shaders) + ظلال تلقائية + BlinnPhong خفيف للموبايل
+    /// ميزة موثقة في Surface Shaders) + ظلال تلقائية + Lambert للموبايل
     /// (noforwardadd = ضوء اتجاهي واحد فقط). النسيج أبيض والمواد تضبط المواصفات.
+    /// v1.6.0: صيغة Lambert بلا Specular/Shininess — صيغة BlinnPhong كانت تُفشل
+    /// تجميع d3d11 («invalid subscript 'Shininess'») وتُحتسب خطأي بناء عند
+    /// توقيت استيراد معين (تشغيلة v1.6.0 الأولى 39398140522) رغم نجاح أندرويد.
     /// </summary>
     private const string TrPaintShaderSource = @"
 Shader ""TR/Paint""
@@ -144,8 +147,6 @@ Shader ""TR/Paint""
     Properties
     {
         _MainTex (""Texture"", 2D) = ""white"" {}
-        _SpecColor (""Specular Color"", Color) = (0.15, 0.15, 0.15, 1)
-        _Shininess (""Shininess"", Range(0.01, 1)) = 0.08
     }
     SubShader
     {
@@ -153,11 +154,10 @@ Shader ""TR/Paint""
         LOD 200
 
         CGPROGRAM
-        #pragma surface surf BlinnPhong noforwardadd
+        #pragma surface surf Lambert noforwardadd
         #pragma target 2.0
 
         sampler2D _MainTex;
-        half _Shininess;
 
         struct Input
         {
@@ -169,8 +169,6 @@ Shader ""TR/Paint""
         {
             fixed4 c = tex2D(_MainTex, IN.uv_MainTex) * IN.color;
             o.Albedo = c.rgb;
-            o.Specular = 1.0;
-            o.Shininess = _Shininess;
             o.Alpha = c.a;
         }
         ENDCG
