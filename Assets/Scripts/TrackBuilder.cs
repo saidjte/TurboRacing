@@ -631,11 +631,19 @@ public class TrackBuilder : MonoBehaviour
 
         Physics.SyncTransforms();
 
-        // v2.9.0 — السطح الفيزيائي الوحيد يُبنى قبل المسح التشخيصي: أشعة المسح
-        // تصطدم بالديك (RoadDeck_TARMAC) بدل السقوط في الفراغ، فيزول وسم
-        // SCAN-FAIL الدائم في سطر التشخيص وتعود خلايا الطريق لصالحة الاستخدام.
-        BuildBakedGroundNet();
-        BuildRoadDeck();
+        // v3.0.0 — العلاج الجذري لـ«السيارة تصطدم بأشياء غير مرئية في المنعطفات
+        // وتنزلق بشدة»: الحلبة أصل مصرفي (يرتفع الطريق إلى ~16م على منحدر حتى
+        // 34 درجة)، والديك الأفقي 2×2م كان يترجم المنحدر إلى درج غير مرئي بخطوات
+        // 25..150سم تصدم السيارة عند كل خلية. الأسطح الجديدة: حزام مائل متصل C0
+        // حول خط السباق (صناديق بدوران مطابقة للميلان) + العالم الخارجي مستطيلات.
+        // false فقط عند فك تالف → المسار القديم الكامل احتياطاً.
+        if (!TryBuildSmoothBandSurfaces())
+        {
+            // v2.2.0: الخط المخبوز أولاً (مولّد من هندسة APK الحقيقية) — المسح
+            // الاحتياطي فقط إن فشل فك الخط، لأن المسح ظل يفشل صامتاً على الأجهزة
+            BuildBakedGroundNet();
+            BuildRoadDeck();
+        }
 
         // 2) مسح الطريق (تشخيصي + خلايا استبعاد الديكور) — بعد وجود الديك
         // v2.2.0: الخط والانطلاق والبوابات من البيانات المخبوزة لا من نتيجة المسح
@@ -878,8 +886,10 @@ public class TrackBuilder : MonoBehaviour
     /// الإجرائي الاحتياطي (مستطيل 14..134 × 12..76 فوق منطقة الجراجات!)
     /// ولهذا بدا الانطلاق خاطئاً وكانت بوابات اللفات ميتة والإنقاذ يجر السيارة
     /// إلى منطقة الجراجات. false عند فك تالف → المسح الاحتياطي كما كان.</summary>
-    bool TryBuildBakedLine()
+    /// <summary>فك الخط المخبوز (v3.0.0: مشترك بين خط السباق وحزام الأسطح).</summary>
+    static bool TryDecodeLinePoints(out Vector3[] pts)
     {
+        pts = null;
         byte[] d;
         try { d = System.Convert.FromBase64String(BakedLineB64); }
         catch (System.FormatException) { return false; }
@@ -887,18 +897,24 @@ public class TrackBuilder : MonoBehaviour
         int n = d.Length / 4;
         if (n < 12) return false;
 
-        var pts = new Vector3[n];
+        pts = new Vector3[n];
         for (int i = 0; i < n; i++)
         {
             float x = System.BitConverter.ToInt16(d, i * 4) * 0.1f;
             float z = System.BitConverter.ToInt16(d, i * 4 + 2) * 0.1f;
             pts[i] = new Vector3(x, 0f, z);
         }
+        return true;
+    }
+
+    bool TryBuildBakedLine()
+    {
+        if (!TryDecodeLinePoints(out Vector3[] pts)) return false;
 
         RacingLine = pts;
         // نحفظ نتيجة المسح في الوسم للتشخيص (BAKED+SCAN:n يعني الخط المخبوز والمسح نجح)
         LineSourceTag = LineSourceTag.StartsWith("SCAN") ? "BAKED+" + LineSourceTag : "BAKED";
-        Debug.Log($"[TrackBuilder] v2.2.0: خط السباق المخبوز ({n} نقطة) — مستقل عن مسح وقت التشغيل");
+        Debug.Log($"[TrackBuilder] v2.2.0: خط السباق المخبوز ({pts.Length} نقطة) — مستقل عن مسح وقت التشغيل");
         return true;
     }
 
@@ -1033,6 +1049,667 @@ public class TrackBuilder : MonoBehaviour
 
         Physics.SyncTransforms();
         Debug.Log($"[TrackBuilder] v2.5.0: تنسيق الأسطح — أُزيل {removed} مصادماً فوق ممر الطريق، خُفّضت {lowered} حافة قريبة");
+    }
+
+    // ==================================================================
+    // ==== v3.0.0: الأسطح المصقولة — حقل ارتفاع بصناديق مائلة ====
+    // ==================================================================
+    //
+    // بلاغ ميداني بعد v2.9.0: «السيارة تنزلق بشدة وفي المنعطفات تصتضم بأشياء
+    // غير مرئية». التشخيص الجنائي للبلوبات المخبوزة (محاكاة Python على 32 ألف
+    // خلية) كشف الجذر: الحلبة البيضاوية أصل مصرفي (Banked Oval) — في المنعطفات
+    // الأربعة يرتفع الطريق من ~0م إلى ~16م عبر منحدر جانبي يصل 34 درجة، وسطح
+    // الطريق الصلب (v2.2.0) كان يترجم هذا المنحدر إلى صناديق أفقية مسطّحة 2×2م
+    // = درج غير مرئي من 25سم حتى 150سم بين كل خليتين (20% من أزواج الخلايا
+    // حول خط السباق تتجاوز 25سم). السيارة ترى إسفلتاً منحنياً ناعماً (شبكة
+    // الأصل المرئية بلا مصادم منذ v2.9.0) وتصطدم جسدياً بسلّم غير مرئي عند
+    // كل خلية — انطلاق في الهواء، هبوط مائل، انزلاق، والشعور بأن الفيزياء
+    // «منعدمة». المستقيمات مسطحة (-0.01م) لذلك كانت سليمة تماماً.
+    //
+    // الحل (متحقق منه عددياً قبل الكتابة): داخل حزام حول خط السباق يُستبدل
+    // الدرج بحقل ارتفاع متصل C0 — لكل خلية صندوق مائل (BoxCollider بدوران)
+    // سطحُه العلوي يوازي المستوى الأنسب لارتفاعات عقد زواياها الأربعة،
+    // والعقد نفسها ناتجة عن متوسطات الخلايا المجاورة + تمريرتا تنعيم
+    // لابلاسي. النتيجة المقاسة: أقصى درجة بين خليتين متجاورتين 16.5سم
+    // (كانت 150سم) وأقصى تغير ارتفاع لكل 2م على الخط 16.4سم — أرض مصرفية
+    // حقيقية تُقود كمضمار، مع بقاء الدرج القديم احتياطاً عند فشل فك البلوبات.
+
+    /// <summary>حجم خلية الشبكة الفيزيائية (نفس شبكة البلوبات المخبوزة).</summary>
+    const float BandCell = 2f;
+    /// <summary>نصف قطر حزام الطريق حول خط السباق بالخلايا (12 × 2م = 24م).</summary>
+    const int BandRadiusCells = 12;
+    /// <summary>فرق الارتفاع بين خليتين متجاورتين يوسّع الحزام تلقائياً فوق
+    /// «الجدار المصرفي» أينما امتد — لا درج خارج الحزام أبداً.</summary>
+    const float WallStepM = 0.06f;
+    /// <summary>عمق مرجع العشب حول حزام الطريق بالخلايا (5 × 2م = 10م).</summary>
+    const int ApronDepthCells = 5;
+    /// <summary>رفع سطح الطريق فوق الارتفاع المخبوز (منذ v2.5.0).</summary>
+    const float DeckTopLift = 0.09f;
+    /// <summary>تسامح الخلية المسطحة — تُدمج في صناديق أفقية بدل المائلة.</summary>
+    const float FlatTolerance = 0.025f;
+    /// <summary>تمريرات تنعيم لابلاسي على عقد الشبكة.</summary>
+    const int NodeSmoothPasses = 2;
+
+    /// <summary>خلية في الحزام: نوع السطح + ارتفاعه النهائي.</summary>
+    struct BandCell { public bool Tarmac; public float Top; }
+
+    /// <summary>مستطيل مخبوز مفكوك (بوحدات عالمية، Y = قمة السطح).</summary>
+    struct BakedRectY { public float X0, Z0, W, H, Y; }
+
+    static long BandKey(int ix, int iz) => (long)ix * 1000003L + iz;
+
+    /// <summary>فك بلوب مخبوز إلى قائمة مستطيلات عالمية + خريطة خلايا (أدنى قمة).</summary>
+    static bool TryDecodeBaked(string b64, float originXZ, float yScale, float lift,
+        List<BakedRectY> rects, Dictionary<long, float> cells)
+    {
+        byte[] data;
+        try { data = System.Convert.FromBase64String(b64); }
+        catch (System.FormatException) { return false; }
+        int n = data.Length / 10;
+        if (n == 0) return false;
+
+        for (int r = 0; r < n; r++)
+        {
+            int cx = System.BitConverter.ToInt16(data, r * 10);
+            int cz = System.BitConverter.ToInt16(data, r * 10 + 2);
+            int w2 = System.BitConverter.ToInt16(data, r * 10 + 4);
+            int h2 = System.BitConverter.ToInt16(data, r * 10 + 6);
+            float y = System.BitConverter.ToInt16(data, r * 10 + 8) * yScale + lift;
+
+            BakedRectY rc;
+            rc.X0 = originXZ + cx * BandCell;
+            rc.Z0 = originXZ + cz * BandCell;
+            rc.W = w2 * BandCell;
+            rc.H = h2 * BandCell;
+            rc.Y = y;
+            rects.Add(rc);
+
+            int ix0 = Mathf.FloorToInt(rc.X0 / BandCell);
+            int ix1 = Mathf.FloorToInt((rc.X0 + rc.W - 0.01f) / BandCell);
+            int iz0 = Mathf.FloorToInt(rc.Z0 / BandCell);
+            int iz1 = Mathf.FloorToInt((rc.Z0 + rc.H - 0.01f) / BandCell);
+            for (int ix = ix0; ix <= ix1; ix++)
+                for (int iz = iz0; iz <= iz1; iz++)
+                {
+                    long k = BandKey(ix, iz);
+                    if (!cells.TryGetValue(k, out float t) || y < t) cells[k] = y;
+                }
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// v3.0.0 — البناء الرئيسي: حزام مائل متصل حول خط السباق + العالم الخارجي
+    /// بالمستطيلات المدمجة (بقواعد التنسيق القديمة). false عند فشل فك الخط أو
+    /// البلوبات فيستدعي المسار القديم الكامل (شبكة + ديك + تنسيق).
+    /// </summary>
+    bool TryBuildSmoothBandSurfaces()
+    {
+        // 0) خط السباق المخبوز أولاً — الحزام نسبة إليه
+        if (!TryDecodeLinePoints(out Vector3[] line) || line.Length < 12) return false;
+
+        // 1) فك البلوبات الثلاثة
+        var deckRects = new List<BakedRectY>(8085);
+        var grndRects = new List<BakedRectY>(2572);
+        var fillRects = new List<BakedRectY>(1709);
+        var deckCells = new Dictionary<long, float>(34000);
+        var grndCells = new Dictionary<long, float>(50000);
+        var fillCells = new Dictionary<long, float>(90000);
+        if (!TryDecodeBaked(DeckB64, -600f, 0.05f, DeckTopLift, deckRects, deckCells))
+            return false;
+        TryDecodeBaked(GroundNetB64, -620f, 0.1f, 0f, grndRects, grndCells);
+        TryDecodeBaked(FillB64, -600f, 0.05f, 0f, fillRects, fillCells);
+
+        // 2) كثافة الخط: عينة كل 2م (لدبابيس القرص)
+        var dense = new List<Vector2>(1100);
+        int ln = line.Length;
+        for (int i = 0; i < ln; i++)
+        {
+            Vector2 a = new Vector2(line[i].x, line[i].z);
+            Vector2 b = new Vector2(line[(i + 1) % ln].x, line[(i + 1) % ln].z);
+            float L = Vector2.Distance(a, b);
+            int steps = Mathf.Max(1, Mathf.FloorToInt(L / BandCell));
+            for (int s = 0; s < steps; s++)
+                dense.Add(Vector2.Lerp(a, b, (float)s / steps));
+        }
+
+        // 3) قرص حزام الطريق + توسيع تلقائي فوق الجدار المصرفي
+        var bandDeck = new HashSet<long>();
+        foreach (Vector2 p in dense)
+        {
+            int cix = Mathf.FloorToInt(p.x / BandCell);
+            int ciz = Mathf.FloorToInt(p.y / BandCell);
+            for (int dix = -BandRadiusCells; dix <= BandRadiusCells; dix++)
+                for (int diz = -BandRadiusCells; diz <= BandRadiusCells; diz++)
+                {
+                    if (dix * dix + diz * diz > BandRadiusCells * BandRadiusCells) continue;
+                    long k = BandKey(cix + dix, ciz + diz);
+                    if (deckCells.ContainsKey(k)) bandDeck.Add(k);
+                }
+        }
+        // جدران متصلة بالحزام (فرق ارتفاع > 6سم بين جارين) تدخل الحزام كله
+        // حتى لا يقطع الحزامُ المنحدرَ بخطوة حدّية كبيرة.
+        var wallQueue = new Queue<long>(bandDeck);
+        while (wallQueue.Count > 0)
+        {
+            long k = wallQueue.Dequeue();
+            int ix = (int)(k / 1000003L), iz = (int)(k - ix * 1000003L);
+            float h0 = deckCells[k];
+            TryExtendWall(ix + 1, iz, h0, deckCells, bandDeck, wallQueue);
+            TryExtendWall(ix - 1, iz, h0, deckCells, bandDeck, wallQueue);
+            TryExtendWall(ix, iz + 1, h0, deckCells, bandDeck, wallQueue);
+            TryExtendWall(ix, iz - 1, h0, deckCells, bandDeck, wallQueue);
+        }
+
+        // 4) مرجع العشب: BFS بعمق 5 خلايا من حافة الحزام فوق خلايا العشب/الردم
+        var apron = new HashSet<long>();
+        var apronSeen = new HashSet<long>(bandDeck);
+        var apronQueue = new Queue<System.Collections.Generic.KeyValuePair<long, int>>();
+        foreach (long k in bandDeck)
+        {
+            int ix = (int)(k / 1000003L), iz = (int)(k - ix * 1000003L);
+            EnqueueApron(ix + 1, iz, 1, grndCells, fillCells, apronSeen, apronQueue);
+            EnqueueApron(ix - 1, iz, 1, grndCells, fillCells, apronSeen, apronQueue);
+            EnqueueApron(ix, iz + 1, 1, grndCells, fillCells, apronSeen, apronQueue);
+            EnqueueApron(ix, iz - 1, 1, grndCells, fillCells, apronSeen, apronQueue);
+        }
+        while (apronQueue.Count > 0)
+        {
+            var kv = apronQueue.Dequeue();
+            if (kv.Value > ApronDepthCells) continue;
+            long k = kv.Key;
+            if (deckCells.ContainsKey(k)) continue;
+            if (!grndCells.ContainsKey(k) && !fillCells.ContainsKey(k)) continue;
+            apron.Add(k);
+            int ix = (int)(k / 1000003L), iz = (int)(k - ix * 1000003L);
+            EnqueueApron(ix + 1, iz, kv.Value + 1, grndCells, fillCells, apronSeen, apronQueue);
+            EnqueueApron(ix - 1, iz, kv.Value + 1, grndCells, fillCells, apronSeen, apronQueue);
+            EnqueueApron(ix, iz + 1, kv.Value + 1, grndCells, fillCells, apronSeen, apronQueue);
+            EnqueueApron(ix, iz - 1, kv.Value + 1, grndCells, fillCells, apronSeen, apronQueue);
+        }
+
+        // 5) الارتفاعات النهائية: الطريق كما هو، المرجع يُمسك بحافة الطريق
+        var tops = new Dictionary<long, BandCell>(bandDeck.Count + apron.Count);
+        foreach (long k in bandDeck)
+            tops[k] = new BandCell { Tarmac = true, Top = deckCells[k] };
+        foreach (long k in apron)
+        {
+            // أدنى قمة طريق ضمن 4 خلايا (8م) — المرجع يلتصق بها من الأسفل
+            int ix = (int)(k / 1000003L), iz = (int)(k - ix * 1000003L);
+            float nearDeck = float.MaxValue;
+            for (int r = 1; r <= 4 && nearDeck == float.MaxValue; r++)
+                for (int dx = -r; dx <= r && nearDeck == float.MaxValue; dx++)
+                    for (int dz = -r; dz <= r; dz++)
+                    {
+                        if (Mathf.Max(Mathf.Abs(dx), Mathf.Abs(dz)) != r) continue;
+                        if (deckCells.TryGetValue(BandKey(ix + dx, iz + dz), out float t) && t < nearDeck)
+                            nearDeck = t;
+                    }
+            float src = grndCells.TryGetValue(k, out float g) ? g
+                      : fillCells.TryGetValue(k, out float f2) ? f2 : 0f;
+            if (nearDeck < float.MaxValue &&
+                (src > nearDeck - 0.06f || Mathf.Abs(src - nearDeck) > 1f))
+                src = nearDeck - 0.06f;
+            tops[k] = new BandCell { Tarmac = false, Top = src };
+        }
+
+        // 6) عقد الشبكة (زوايا الخلايا) = متوسط الخلايا المجاورة + تنعيم لابلاسي
+        var nodes = new Dictionary<long, float>();
+        foreach (long k in tops.Keys)
+        {
+            int ix = (int)(k / 1000003L), iz = (int)(k - ix * 1000003L);
+            nodes[BandKey(ix, iz)] = float.MinValue;
+            nodes[BandKey(ix + 1, iz)] = float.MinValue;
+            nodes[BandKey(ix, iz + 1)] = float.MinValue;
+            nodes[BandKey(ix + 1, iz + 1)] = float.MinValue;
+        }
+        var nodeKeys = new List<long>(nodes.Keys);
+        foreach (long k in nodeKeys)
+        {
+            int ix = (int)(k / 1000003L), iz = (int)(k - ix * 1000003L);
+            float acc = 0f; int cnt = 0;
+            AccumulateCell(tops, ix - 1, iz - 1, ref acc, ref cnt);
+            AccumulateCell(tops, ix,     iz - 1, ref acc, ref cnt);
+            AccumulateCell(tops, ix - 1, iz,     ref acc, ref cnt);
+            AccumulateCell(tops, ix,     iz,     ref acc, ref cnt);
+            nodes[k] = cnt > 0 ? acc / cnt : float.MinValue;
+        }
+        for (int pass = 0; pass < NodeSmoothPasses; pass++)
+        {
+            var snapshot = new Dictionary<long, float>(nodes);
+            foreach (long k in nodeKeys)
+            {
+                if (!snapshot.TryGetValue(k, out float h) || h == float.MinValue) continue;
+                int ix = (int)(k / 1000003L), iz = (int)(k - ix * 1000003L);
+                float acc = 0f; int cnt = 0;
+                AccumulateNode(snapshot, ix + 1, iz, ref acc, ref cnt);
+                AccumulateNode(snapshot, ix - 1, iz, ref acc, ref cnt);
+                AccumulateNode(snapshot, ix, iz + 1, ref acc, ref cnt);
+                AccumulateNode(snapshot, ix, iz - 1, ref acc, ref cnt);
+                if (cnt > 0) nodes[k] = 0.35f * h + 0.65f * (acc / cnt);
+            }
+        }
+
+        // 7) إصدار الحزام: خلايا مسطحة تُدمج صفّياً، والمائلة صناديق مائلة
+        var bandDeckGo = new GameObject("BandDeck_TARMAC");
+        bandDeckGo.transform.SetParent(transform, false);
+        bandDeckGo.layer = TrackLayer;
+        bandDeckGo.isStatic = true;
+        var bandGrassGo = new GameObject("BandApron_GRASS");
+        bandGrassGo.transform.SetParent(transform, false);
+        bandGrassGo.layer = TrackLayer;
+        bandGrassGo.isStatic = true;
+
+        int tiltedT = 0, tiltedG = 0, flatRuns = 0;
+        var rowsT = new Dictionary<int, List<int>>();
+        var rowsG = new Dictionary<int, List<int>>();
+        foreach (var kv in tops)
+        {
+            int ix = (int)(kv.Key / 1000003L), iz = (int)(kv.Key - ix * 1000003L);
+            AddRow(kv.Value.Tarmac ? rowsT : rowsG, iz, ix);
+        }
+        flatRuns += EmitBandRows(rowsT, tops, nodes, bandDeckGo.transform, "BandTarmac", true, ref tiltedT);
+        flatRuns += EmitBandRows(rowsG, tops, nodes, bandGrassGo.transform, "BandGrass", false, ref tiltedG);
+
+        // 8) خارج الحزام: طريق مدمج/صفّي + ردم مقصوص + عشب بقواعد v2.5.0
+        GameObject outDeckGo = new GameObject("DeckFill_TARMAC");
+        outDeckGo.transform.SetParent(transform, false);
+        outDeckGo.layer = TrackLayer;
+        outDeckGo.isStatic = true;
+
+        int deckMerged = 0, deckRuns = 0;
+        foreach (BakedRectY rc in deckRects)
+        {
+            bool intersects = RectTouchesBand(rc, tops);
+            if (!intersects)
+            {
+                EmitFlatBox(outDeckGo.transform, "DeckTarmac", rc.X0, rc.Z0, rc.W, rc.H, rc.Y);
+                deckMerged++;
+            }
+            else
+            {
+                deckRuns += EmitRowRuns(rc, tops, outDeckGo.transform, "DeckTarmac", 1);
+            }
+        }
+
+        int fillMerged = 0, fillRuns = 0, fillClamped = 0;
+        foreach (BakedRectY rc in fillRects)
+        {
+            // سقف القص: أدنى قمة طريق ضمن 24م من مركز المستطيل
+            float clampTop = float.MaxValue;
+            {
+                int cix = Mathf.FloorToInt((rc.X0 + rc.W * 0.5f) / BandCell);
+                int ciz = Mathf.FloorToInt((rc.Z0 + rc.H * 0.5f) / BandCell);
+                for (int dx = -12; dx <= 12; dx++)
+                    for (int dz = -12; dz <= 12; dz++)
+                        if (deckCells.TryGetValue(BandKey(cix + dx, ciz + dz), out float t) && t < clampTop)
+                            clampTop = t;
+            }
+            float y = rc.Y;
+            if (clampTop < float.MaxValue && y > clampTop + 0.10f)
+            {
+                y = clampTop - 0.06f;   // جدار ردم غير مرئي يُسطّح إلى مرجع
+                fillClamped++;
+            }
+
+            if (!RectTouchesBand(rc, tops))
+            {
+                EmitFlatBox(outDeckGo.transform, "FillGrass", rc.X0, rc.Z0, rc.W, rc.H, y);
+                fillMerged++;
+            }
+            else
+            {
+                fillRuns += EmitRowRuns(rc, tops, outDeckGo.transform, "FillGrass", 4, y,
+                    deckCells, clampToDeck: true);
+            }
+        }
+
+        // 9) العشب البعيد: قواعد v2.5.0 (تخطي المتقاطع مع الطريق، تخفيض القريب)
+        BuildFarGroundNet(grndRects, deckCells);
+
+        Physics.SyncTransforms();
+        Debug.Log($"[TrackBuilder] v3.0.0: الأسطح المصقولة جاهزة — حزام مائل " +
+                  $"{tiltedT}+{tiltedG} خلية (مسطّح مدمج {flatRuns})، خارج الحزام " +
+                  $"طريق {deckMerged} مدمج + {deckRuns} صفّي، ردم {fillMerged} مدمج + " +
+                  $"{fillRuns} صفّي ({fillClamped} قُصّ)، عشب بعيد مدمج");
+        return true;
+    }
+
+    void TryExtendWall(int ix, int iz, float h0,
+        Dictionary<long, float> deckCells, HashSet<long> bandDeck, Queue<long> queue)
+    {
+        long k = BandKey(ix, iz);
+        if (bandDeck.Contains(k) || !deckCells.TryGetValue(k, out float t)) return;
+        if (Mathf.Abs(t - h0) <= WallStepM) return;
+        bandDeck.Add(k);
+        queue.Enqueue(k);
+    }
+
+    static void EnqueueApron(int ix, int iz, int depth,
+        Dictionary<long, float> grndCells, Dictionary<long, float> fillCells,
+        HashSet<long> seen, Queue<System.Collections.Generic.KeyValuePair<long, int>> queue)
+    {
+        long k = BandKey(ix, iz);
+        if (seen.Contains(k)) return;
+        seen.Add(k);
+        queue.Enqueue(new System.Collections.Generic.KeyValuePair<long, int>(k, depth));
+    }
+
+    static void AccumulateCell(Dictionary<long, BandCell> tops, int ix, int iz, ref float acc, ref int cnt)
+    {
+        if (tops.TryGetValue(BandKey(ix, iz), out BandCell c)) { acc += c.Top; cnt++; }
+    }
+
+    static void AccumulateNode(Dictionary<long, float> nodes, int ix, int iz, ref float acc, ref int cnt)
+    {
+        if (nodes.TryGetValue(BandKey(ix, iz), out float h) && h != float.MinValue) { acc += h; cnt++; }
+    }
+
+    /// <summary>هل يلمس المستطيل أي خلية داخل الحزام؟</summary>
+    bool RectTouchesBand(BakedRectY rc, Dictionary<long, BandCell> tops)
+    {
+        int ix0 = Mathf.FloorToInt(rc.X0 / BandCell);
+        int ix1 = Mathf.FloorToInt((rc.X0 + rc.W - 0.01f) / BandCell);
+        int iz0 = Mathf.FloorToInt(rc.Z0 / BandCell);
+        int iz1 = Mathf.FloorToInt((rc.Z0 + rc.H - 0.01f) / BandCell);
+        for (int ix = ix0; ix <= ix1; ix++)
+            for (int iz = iz0; iz <= iz1; iz++)
+                if (tops.ContainsKey(BandKey(ix, iz))) return true;
+        return false;
+    }
+
+    /// <summary>مصفوفة صفوف خلايا (مفتاح = iz) مع دمج التكرارات.</summary>
+    static void AddRow(Dictionary<int, List<int>> rows, int iz, int ix)
+    {
+        if (!rows.TryGetValue(iz, out List<int> l))
+        {
+            l = new List<int>();
+            rows[iz] = l;
+        }
+        l.Add(ix);
+    }
+
+    /// <summary>
+    /// إصدار خلايا حزام من نوع واحد: مسارات أفقية مسطّحة (تسامح 2.5سم) تُدمج،
+    /// وخلايا مائلة تُصدر صناديق مائلة كل خلية على حدة. يعيد عدد المسارات المدمجة.
+    /// </summary>
+    int EmitBandRows(Dictionary<int, List<int>> rows, Dictionary<long, BandCell> tops,
+        Dictionary<long, float> nodes, Transform parent, string namePrefix, bool tarmac, ref int tilted)
+    {
+        int runs = 0;
+        foreach (var kv in rows)
+        {
+            List<int> ixs = kv.Value;
+            if (ixs.Count == 0) continue;
+            ixs.Sort();
+            int i = 0;
+            while (i < ixs.Count)
+            {
+                int iz = kv.Key;
+                int ix = ixs[i];
+
+                float runSum, runMean;
+                if (IsFlatCell(ix, iz, tops, nodes, out runSum, out runMean))
+                {
+                    // مدّ المدى المسطّح
+                    int j = i;
+                    float sum = runSum;
+                    int count = 1;
+                    while (j + 1 < ixs.Count && ixs[j + 1] == ixs[j] + 1 &&
+                           IsFlatCell(ixs[j + 1], iz, tops, nodes, out float s2, out float m2) &&
+                           Mathf.Abs(m2 - runMean) <= 0.03f)
+                    {
+                        j++; sum += s2; count++;
+                    }
+                    float top = sum / count;
+                    int len = count;
+                    float x0 = ixs[i] * BandCell;
+                    float z0 = iz * BandCell;
+                    EmitFlatBox(parent, namePrefix, x0 - 0.02f, z0 - 0.02f,
+                        len * BandCell + 0.04f, BandCell + 0.04f, top);
+                    runs++;
+                    i = j + 1;
+                }
+                else
+                {
+                    EmitTiltedCell(parent, $"{namePrefix}_{ix}_{iz}", ix, iz, tops, nodes, tarmac);
+                    tilted++;
+                    i++;
+                }
+            }
+        }
+        return runs;
+    }
+
+    /// <summary>هل الخلية مسطحة (عقدها الأربعة موجودة وضمن التسامح)؟ يعني متوسط ارتفاعها.</summary>
+    bool IsFlatCell(int ix, int iz, Dictionary<long, BandCell> tops,
+        Dictionary<long, float> nodes, out float sum, out float mean)
+    {
+        sum = 0f; mean = 0f;
+        float h00 = NodeAt(nodes, ix, iz), h10 = NodeAt(nodes, ix + 1, iz);
+        float h01 = NodeAt(nodes, ix, iz + 1), h11 = NodeAt(nodes, ix + 1, iz + 1);
+        if (h00 == float.MinValue || h10 == float.MinValue ||
+            h01 == float.MinValue || h11 == float.MinValue) return false;
+        float mn = Mathf.Min(Mathf.Min(h00, h10), Mathf.Min(h01, h11));
+        float mx = Mathf.Max(Mathf.Max(h00, h10), Mathf.Max(h01, h11));
+        if (mx - mn > FlatTolerance) return false;
+        sum = h00 + h10 + h01 + h11;
+        mean = sum * 0.25f;
+        return true;
+    }
+
+    static float NodeAt(Dictionary<long, float> nodes, int ix, int iz) =>
+        nodes.TryGetValue(BandKey(ix, iz), out float h) ? h : float.MinValue;
+
+    /// <summary>صندوق أفقي مسطّح (قمة عند top بالضبط).</summary>
+    static void EmitFlatBox(Transform parent, string namePrefix,
+        float x0, float z0, float w, float h, float top)
+    {
+        GameObject go = new GameObject($"{namePrefix}_{Mathf.RoundToInt(x0)}_{Mathf.RoundToInt(z0)}");
+        go.layer = TrackLayer; // كل مصادم على طبقة الحلبة صراحةً (أشعة العشب/المسح)
+        go.isStatic = true;
+        go.transform.SetParent(parent, false);
+        BoxCollider col = go.AddComponent<BoxCollider>();
+        col.size = new Vector3(w, 30f, h);
+        col.center = new Vector3(w * 0.5f, -15f, h * 0.5f);
+        go.transform.localPosition = new Vector3(x0, top, z0);
+    }
+
+    /// <summary>خلية مائلة: مستوى أنسب لعقدها الأربعة (C0 مع جيرانها).</summary>
+    void EmitTiltedCell(Transform parent, string name, int ix, int iz,
+        Dictionary<long, BandCell> tops, Dictionary<long, float> nodes, bool tarmac)
+    {
+        float h00 = NodeAt(nodes, ix, iz), h10 = NodeAt(nodes, ix + 1, iz);
+        float h01 = NodeAt(nodes, ix, iz + 1), h11 = NodeAt(nodes, ix + 1, iz + 1);
+
+        // عقدة ناقصة (خلية معزولة عند حافة الحزام) → صندوق مسطّح بارتفاع الخلية
+        if (h00 == float.MinValue || h10 == float.MinValue ||
+            h01 == float.MinValue || h11 == float.MinValue)
+        {
+            BandCell c = tops[BandKey(ix, iz)];
+            EmitFlatBox(parent, tarmac ? "BandTarmac" : "BandGrass",
+                ix * BandCell, iz * BandCell, BandCell, BandCell, c.Top);
+            return;
+        }
+
+        // المستوى الأنسب: ناظم من الحدفين القطريين (أقل مربعات لشبكة 2×2)
+        Vector3 d1 = new Vector3(BandCell, h10 - h01, -BandCell);   // p10 - p01
+        Vector3 d2 = new Vector3(BandCell, h11 - h00, BandCell);    // p11 - p00
+        Vector3 n = Vector3.Cross(d1, d2);
+        if (n.sqrMagnitude < 1e-8f)
+        {
+            EmitFlatBox(parent, tarmac ? "BandTarmac" : "BandGrass",
+                ix * BandCell, iz * BandCell, BandCell, BandCell, (h00 + h11) * 0.5f);
+            return;
+        }
+        if (n.y < 0f) n = -n;
+        n.Normalize();
+
+        float ch = (h00 + h10 + h01 + h11) * 0.25f;
+        Quaternion rot = Quaternion.FromToRotation(Vector3.up, n);
+        Vector3 pos = new Vector3(ix * BandCell + 1f, ch, iz * BandCell + 1f) - n * 15f;
+
+        GameObject go = new GameObject(name);
+        go.layer = TrackLayer;
+        go.isStatic = true;
+        go.transform.SetParent(parent, false);
+        go.transform.SetPositionAndRotation(pos, rot);
+        BoxCollider col = go.AddComponent<BoxCollider>();
+        // 2.9م = تغطية أي التفاف للخلية 2×2 حتى 45 درجة (تراكب مع الجيران
+        // يضمن استمرارية السطح بلا فجوات عند زوايا الغلاف)
+        col.size = new Vector3(2.9f, 30f, 2.9f);
+        col.center = Vector3.zero;
+    }
+
+    /// <summary>
+    /// صفوف خلايا مستطيل خارج الحزام → صناديق أفقية (أدنى طول اختياري).
+    /// clampToDeck: كل مدى يُقص إلى أدنى قمة طريق ضمن 24م من مركزه −6سم
+    /// إن كان أعلى منها — قتل جدران الردم غير المرئية عند حدود الحزام.
+    /// </summary>
+    static int EmitRowRuns(BakedRectY rc, Dictionary<long, BandCell> tops,
+        Transform parent, string namePrefix, int minRun, float forcedTop = float.MaxValue,
+        Dictionary<long, float> deckCells = null, bool clampToDeck = false)
+    {
+        int ix0 = Mathf.FloorToInt(rc.X0 / BandCell);
+        int ix1 = Mathf.FloorToInt((rc.X0 + rc.W - 0.01f) / BandCell);
+        int iz0 = Mathf.FloorToInt(rc.Z0 / BandCell);
+        int iz1 = Mathf.FloorToInt((rc.Z0 + rc.H - 0.01f) / BandCell);
+        float top = forcedTop != float.MaxValue ? forcedTop : rc.Y;
+
+        int runs = 0;
+        for (int iz = iz0; iz <= iz1; iz++)
+        {
+            int runStart = -1;
+            for (int ix = ix0; ix <= ix1 + 1; ix++)
+            {
+                bool inBand = ix <= ix1 && tops.ContainsKey(BandKey(ix, iz));
+                if (!inBand)
+                {
+                    if (runStart >= 0)
+                    {
+                        int len = ix - runStart;
+                        if (len >= minRun)
+                        {
+                            float runTop = top;
+                            if (clampToDeck && deckCells != null)
+                            {
+                                int cix = runStart + len / 2;
+                                float nearDeck = float.MaxValue;
+                                for (int dx = -12; dx <= 12; dx++)
+                                    for (int dz = -12; dz <= 12; dz++)
+                                        if (deckCells.TryGetValue(BandKey(cix + dx, iz + dz), out float t) && t < nearDeck)
+                                            nearDeck = t;
+                                if (nearDeck < float.MaxValue && runTop > nearDeck + 0.10f)
+                                    runTop = nearDeck - 0.06f;
+                            }
+                            EmitFlatBox(parent, namePrefix,
+                                runStart * BandCell, iz * BandCell,
+                                len * BandCell, BandCell, runTop);
+                            runs++;
+                        }
+                        runStart = -1;
+                    }
+                }
+                else if (runStart < 0) runStart = ix;
+            }
+        }
+        return runs;
+    }
+
+    /// <summary>
+    /// العشب البعيد (خارج الحزام) بقواعد v2.5.0 حرفياً: مستطيل يقطع خلية طريق
+    /// يُتخطى، وقريب من الطريق وقمته أعلى من حافته يُخفّض إلى الحافة −6سم.
+    /// الشبكة المرئية تُبنى من قمم المستطيلات الأصلية (كما كانت).
+    /// </summary>
+    void BuildFarGroundNet(List<BakedRectY> grndRects, Dictionary<long, float> deckCells)
+    {
+        if (grndRects.Count == 0) return;
+        EnsureOvalMaterials();
+
+        var verts = new List<Vector3>(grndRects.Count * 4);
+        var tris = new List<int>(grndRects.Count * 6);
+        var uvs = new List<Vector2>(grndRects.Count * 4);
+
+        GameObject go = new GameObject("GroundNet");
+        go.transform.SetParent(transform, false);
+        go.layer = TrackLayer;
+
+        int emitted = 0, skipped = 0, lowered = 0;
+        foreach (BakedRectY rc in grndRects)
+        {
+            int ix0 = Mathf.FloorToInt(rc.X0 / BandCell);
+            int ix1 = Mathf.FloorToInt((rc.X0 + rc.W - 0.01f) / BandCell);
+            int iz0 = Mathf.FloorToInt(rc.Z0 / BandCell);
+            int iz1 = Mathf.FloorToInt((rc.Z0 + rc.H - 0.01f) / BandCell);
+
+            // قاعدة v2.5.0 (1): تقاطع مع خلية طريق → بلا مصادم ولا شبكة
+            bool overlaps = false;
+            float nearMin = float.MaxValue;
+            for (int ix = ix0 - 2; ix <= ix1 + 2 && !overlaps; ix++)
+                for (int iz = iz0 - 2; iz <= iz1 + 2; iz++)
+                {
+                    if (!deckCells.TryGetValue(BandKey(ix, iz), out float t)) continue;
+                    bool inside = ix >= ix0 && ix <= ix1 && iz >= iz0 && iz <= iz1;
+                    if (inside) { overlaps = true; break; }
+                    if (t < nearMin) nearMin = t;
+                }
+            if (overlaps) { skipped++; continue; }
+
+            // قاعدة v2.5.0 (2): قريب من الطريق وأعلى من حافته → خفّض المصادم
+            float colTop = rc.Y;
+            if (nearMin < float.MaxValue && rc.Y > nearMin - 0.06f)
+            {
+                colTop = nearMin - 0.06f;
+                lowered++;
+            }
+
+            // شبكة مرئية (قمم أصلية — مطابقة للسلوك السابق) + مصادم منفصل
+            int b = verts.Count;
+            verts.Add(new Vector3(rc.X0, rc.Y, rc.Z0));
+            verts.Add(new Vector3(rc.X0 + rc.W, rc.Y, rc.Z0));
+            verts.Add(new Vector3(rc.X0 + rc.W, rc.Y, rc.Z0 + rc.H));
+            verts.Add(new Vector3(rc.X0, rc.Y, rc.Z0 + rc.H));
+            tris.Add(b); tris.Add(b + 2); tris.Add(b + 1);
+            tris.Add(b); tris.Add(b + 3); tris.Add(b + 2);
+            float u0 = rc.X0 / 15f, v0 = rc.Z0 / 15f;
+            uvs.Add(new Vector2(u0, v0));
+            uvs.Add(new Vector2((rc.X0 + rc.W) / 15f, v0));
+            uvs.Add(new Vector2((rc.X0 + rc.W) / 15f, (rc.Z0 + rc.H) / 15f));
+            uvs.Add(new Vector2(u0, (rc.Z0 + rc.H) / 15f));
+
+            GameObject cgo = new GameObject("GroundNetGrass");
+            cgo.layer = TrackLayer;
+            cgo.isStatic = true;
+            cgo.transform.SetParent(go.transform, false);
+            cgo.transform.localPosition = Vector3.zero;
+            BoxCollider col = cgo.AddComponent<BoxCollider>();
+            float skirt = Mathf.Min(40f, Mathf.Max(10f, colTop + 32f));
+            col.center = new Vector3(rc.X0 + rc.W * 0.5f, colTop - skirt * 0.5f, rc.Z0 + rc.H * 0.5f);
+            col.size = new Vector3(rc.W, skirt, rc.H);
+            emitted++;
+        }
+
+        Mesh mesh = new Mesh
+        {
+            name = "GroundNet",
+            indexFormat = verts.Count > 65535
+                ? UnityEngine.Rendering.IndexFormat.UInt32
+                : UnityEngine.Rendering.IndexFormat.UInt16
+        };
+        mesh.SetVertices(verts);
+        mesh.SetUVs(0, uvs);
+        mesh.SetTriangles(tris, 0);
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        MeshFilter mf = go.AddComponent<MeshFilter>();
+        mf.sharedMesh = mesh;
+        MeshRenderer mr = go.AddComponent<MeshRenderer>();
+        mr.sharedMaterial = ovalMatGrass != null ? ovalMatGrass : ovalMatRock;
+        mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+
+        Physics.SyncTransforms();
+        Debug.Log($"[TrackBuilder] v3.0.0: العشب البعيد — {emitted} مستطيل " +
+                  $"({skipped} متقاطع مع طريق، {lowered} مُخفّض)");
     }
 
     /// <summary>
