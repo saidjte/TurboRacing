@@ -1091,7 +1091,7 @@ public class TrackBuilder : MonoBehaviour
     const int NodeSmoothPasses = 2;
 
     /// <summary>خلية في الحزام: نوع السطح + ارتفاعه النهائي.</summary>
-    struct BandCell { public bool Tarmac; public float Top; }
+    struct BandCellInfo { public bool Tarmac; public float Top; }
 
     /// <summary>مستطيل مخبوز مفكوك (بوحدات عالمية، Y = قمة السطح).</summary>
     struct BakedRectY { public float X0, Z0, W, H, Y; }
@@ -1229,9 +1229,9 @@ public class TrackBuilder : MonoBehaviour
         }
 
         // 5) الارتفاعات النهائية: الطريق كما هو، المرجع يُمسك بحافة الطريق
-        var tops = new Dictionary<long, BandCell>(bandDeck.Count + apron.Count);
+        var tops = new Dictionary<long, BandCellInfo>(bandDeck.Count + apron.Count);
         foreach (long k in bandDeck)
-            tops[k] = new BandCell { Tarmac = true, Top = deckCells[k] };
+            tops[k] = new BandCellInfo { Tarmac = true, Top = deckCells[k] };
         foreach (long k in apron)
         {
             // أدنى قمة طريق ضمن 4 خلايا (8م) — المرجع يلتصق بها من الأسفل
@@ -1250,7 +1250,7 @@ public class TrackBuilder : MonoBehaviour
             if (nearDeck < float.MaxValue &&
                 (src > nearDeck - 0.06f || Mathf.Abs(src - nearDeck) > 1f))
                 src = nearDeck - 0.06f;
-            tops[k] = new BandCell { Tarmac = false, Top = src };
+            tops[k] = new BandCellInfo { Tarmac = false, Top = src };
         }
 
         // 6) عقد الشبكة (زوايا الخلايا) = متوسط الخلايا المجاورة + تنعيم لابلاسي
@@ -1395,9 +1395,9 @@ public class TrackBuilder : MonoBehaviour
         queue.Enqueue(new System.Collections.Generic.KeyValuePair<long, int>(k, depth));
     }
 
-    static void AccumulateCell(Dictionary<long, BandCell> tops, int ix, int iz, ref float acc, ref int cnt)
+    static void AccumulateCell(Dictionary<long, BandCellInfo> tops, int ix, int iz, ref float acc, ref int cnt)
     {
-        if (tops.TryGetValue(BandKey(ix, iz), out BandCell c)) { acc += c.Top; cnt++; }
+        if (tops.TryGetValue(BandKey(ix, iz), out BandCellInfo c)) { acc += c.Top; cnt++; }
     }
 
     static void AccumulateNode(Dictionary<long, float> nodes, int ix, int iz, ref float acc, ref int cnt)
@@ -1406,7 +1406,7 @@ public class TrackBuilder : MonoBehaviour
     }
 
     /// <summary>هل يلمس المستطيل أي خلية داخل الحزام؟</summary>
-    bool RectTouchesBand(BakedRectY rc, Dictionary<long, BandCell> tops)
+    bool RectTouchesBand(BakedRectY rc, Dictionary<long, BandCellInfo> tops)
     {
         int ix0 = Mathf.FloorToInt(rc.X0 / BandCell);
         int ix1 = Mathf.FloorToInt((rc.X0 + rc.W - 0.01f) / BandCell);
@@ -1433,7 +1433,7 @@ public class TrackBuilder : MonoBehaviour
     /// إصدار خلايا حزام من نوع واحد: مسارات أفقية مسطّحة (تسامح 2.5سم) تُدمج،
     /// وخلايا مائلة تُصدر صناديق مائلة كل خلية على حدة. يعيد عدد المسارات المدمجة.
     /// </summary>
-    int EmitBandRows(Dictionary<int, List<int>> rows, Dictionary<long, BandCell> tops,
+    int EmitBandRows(Dictionary<int, List<int>> rows, Dictionary<long, BandCellInfo> tops,
         Dictionary<long, float> nodes, Transform parent, string namePrefix, bool tarmac, ref int tilted)
     {
         int runs = 0;
@@ -1482,7 +1482,7 @@ public class TrackBuilder : MonoBehaviour
     }
 
     /// <summary>هل الخلية مسطحة (عقدها الأربعة موجودة وضمن التسامح)؟ يعني متوسط ارتفاعها.</summary>
-    bool IsFlatCell(int ix, int iz, Dictionary<long, BandCell> tops,
+    bool IsFlatCell(int ix, int iz, Dictionary<long, BandCellInfo> tops,
         Dictionary<long, float> nodes, out float sum, out float mean)
     {
         sum = 0f; mean = 0f;
@@ -1517,7 +1517,7 @@ public class TrackBuilder : MonoBehaviour
 
     /// <summary>خلية مائلة: مستوى أنسب لعقدها الأربعة (C0 مع جيرانها).</summary>
     void EmitTiltedCell(Transform parent, string name, int ix, int iz,
-        Dictionary<long, BandCell> tops, Dictionary<long, float> nodes, bool tarmac)
+        Dictionary<long, BandCellInfo> tops, Dictionary<long, float> nodes, bool tarmac)
     {
         float h00 = NodeAt(nodes, ix, iz), h10 = NodeAt(nodes, ix + 1, iz);
         float h01 = NodeAt(nodes, ix, iz + 1), h11 = NodeAt(nodes, ix + 1, iz + 1);
@@ -1526,7 +1526,7 @@ public class TrackBuilder : MonoBehaviour
         if (h00 == float.MinValue || h10 == float.MinValue ||
             h01 == float.MinValue || h11 == float.MinValue)
         {
-            BandCell c = tops[BandKey(ix, iz)];
+            BandCellInfo c = tops[BandKey(ix, iz)];
             EmitFlatBox(parent, tarmac ? "BandTarmac" : "BandGrass",
                 ix * BandCell, iz * BandCell, BandCell, BandCell, c.Top);
             return;
@@ -1566,7 +1566,7 @@ public class TrackBuilder : MonoBehaviour
     /// clampToDeck: كل مدى يُقص إلى أدنى قمة طريق ضمن 24م من مركزه −6سم
     /// إن كان أعلى منها — قتل جدران الردم غير المرئية عند حدود الحزام.
     /// </summary>
-    static int EmitRowRuns(BakedRectY rc, Dictionary<long, BandCell> tops,
+    static int EmitRowRuns(BakedRectY rc, Dictionary<long, BandCellInfo> tops,
         Transform parent, string namePrefix, int minRun, float forcedTop = float.MaxValue,
         Dictionary<long, float> deckCells = null, bool clampToDeck = false)
     {
