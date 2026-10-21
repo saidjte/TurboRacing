@@ -339,9 +339,19 @@ public class RaceHUD : MonoBehaviour
               $"P{carCtrl.DebugPitchRate:+0.00;-0.00} r{carCtrl.DebugBrakeRamp:0.0}"
             : "?";
 
+        // (v2.9.0) السطر الخامس — علبة التروس + عارضات الرف المضادة:
+        //   G3 62%   الترس الحالي ودورات المحرك المتخيلة داخل نطاقه
+        //            (الترس يتغير عند حدود 16/31/48/66/84% من السرعة القصوى)
+        //   AR0870   مجموع قوى العارضات المضادة نيوتن — 0 في الهواء،
+        //            يرتفع مع ميلان الجسم في المنعطفات (فيزياء نقل الثقل حية)
+        string dyn2 = carCtrl != null
+            ? $"G{carCtrl.DebugGear} {carCtrl.DebugRpm01 * 100f:00}%  AR{carCtrl.DebugAntiRollN:0000}"
+            : "?";
+
         dbgText.text = $"X {p.x:0.#}  Y {p.y:0.#}  Z {p.z:0.#}\n" +
                        $"{surf}   line {(lineD >= 0f ? lineD.ToString("0") + "m" : "-")}\n" +
                        $"{src}   {spd:0}km/h  {inp}\n" +
-                       $"{dyn}";
+                       $"{dyn}\n" +
+                       $"{dyn2}";
     }
 }

@@ -123,11 +123,18 @@ public class GameBootstrap : MonoBehaviour
         GameObject track = new GameObject("Track");
         track.AddComponent<TrackBuilder>();
         track.AddComponent<LapManager>(); // بوابات اللفة والتوقيت والحفظ
-        // v2.6.0: التزيين بأسلوب حزم المتجر (المكافئ الإجرائي):
-        track.AddComponent<TrackStyle>(); // طلاء الطريق بأسلوب AK Road Editor (بلا مصادمات)
-        track.AddComponent<TrackProps>(); // حزمة عناصر Cartoon Props حول الحلبة
-        // v2.7.0: الأصول الحقيقية — طريق AK Road Editor + حواجز RailingGenerator:
-        track.AddComponent<AKRoadTrack>();
+
+        // v2.9.0 — علاج «حلبة فوق حلبة» (شكوى ميدانية): طبقة AK الإجرائية
+        // (طلاء TrackStyle + طريق AKRoadTrack + حواجزه + عناصر TrackProps)
+        // كانت تُبنى فوق الحلبة الأصلية CartoonOvalTrack = طريق مرئي ثانٍ
+        // منفصل عنها في المنعطفات + حواجز تعترض الطريق الحقيقي.
+        // الآن تُضاف فوق المسار الإجرائي الاحتياطي فقط حيث لا حلبة أصلية.
+        if (TrackBuilder.Instance != null && !TrackBuilder.Instance.UsingOvalAsset)
+        {
+            track.AddComponent<TrackStyle>();   // طلاء الطريق بأسلوب AK Road Editor (بلا مصادمات)
+            track.AddComponent<TrackProps>();   // حزمة عناصر Cartoon Props حول الحلبة
+            track.AddComponent<AKRoadTrack>();  // طريق AK Road Editor + حواجز RailingGenerator
+        }
     }
 
     // ================= الكراج (v1.4.0) =================

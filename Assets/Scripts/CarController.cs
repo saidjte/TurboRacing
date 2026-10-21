@@ -125,6 +125,11 @@ public class CarController : MonoBehaviour
     public float DebugTcFactor     => mc != null ? mc.DebugTcFactor : 1f;
     public float DebugBrakeRamp    => mc != null ? mc.DebugBrakeRamp : 0f;
     public float DebugPitchRate    => mc != null ? mc.DebugPitchRate : 0f;
+
+    /// <summary>(v2.9.0) الترس الحالي + RPM المتخيل + قوى عارضات الرف الحية.</summary>
+    public int   DebugGear      => mc != null ? mc.DebugGear : 1;
+    public float DebugRpm01     => mc != null ? mc.DebugRpm01 : 0f;
+    public float DebugAntiRollN => mc != null ? mc.DebugAntiRollN : 0f;
     /// <summary>مُصدِّر مادة الطلاء (يستخدمه SurfaceChecker للتلطيخ على العشب).</summary>
     public MeshRenderer PaintRenderer => paintRenderer;
 
@@ -329,7 +334,9 @@ public class CarController : MonoBehaviour
             // كاملة (0.3م) فيلتحم جسم السيارة بالأرض ويصدر ارتطامات وهمية عند كل
             // مفصل بلاطة. الميزانية الفيزيائية: هامش الانضغاط المتاح بعد الثقل
             // الساكن ≈ 9900 نيوتن → سقف آمن ≈ 9 م/ث² — اعتمدنا 12 مع رفع صلابة النوابض.
-            Downforce = 12f
+            // v2.9.0: 22 بدل 12 — قوة رفع مزدوجة تقريباً تُغرس السيارة بالسرعة
+            // العالية وتجعل نقل الثقل محسوساً، دون تجفيف استجابة التوجيه
+            Downforce = 22f
         };
 
         mc.Configure(setup);

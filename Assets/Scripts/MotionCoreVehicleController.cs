@@ -23,6 +23,18 @@ using UnityEngine;
 ///    وبداية فرملة ناعمة (علاج «الغوص» القاسي).
 /// 4) مثبط ميلان أمامي (معادل VPP AdvancedDamper): مقاومة سرعة الميلان
 ///    حول المحور الجانبي فقط — يقتل اهتزاز القبوة دون تجفيف التعليق.
+///
+/// v2.9.0 — «الفيزياء شبه منعدمة» (شكوى ميدانية): إضافة الديناميكا الحقيقية
+/// الناقصة فوق WheelCollider — كلها أنماط هندسية حرة (MIT-grade) بلا أي
+/// حزمة مقيّدة الترخيص:
+/// 5) عارضات الرف المضادة (Anti-roll bars أمامية/خلفية): نقل الثقل الجانبي
+///    يصير محسوساً — جسم السيارة يميل في المنعطف بدل الانزلاق المسطّح
+///    «اللاإرادي»، مع ثبات أمامي أقوى (صلابة أمامية > خلفية = استقرار).
+/// 6) علبة تروس سداسية بنموذج النسب من JRS Vehicle Physics Controller
+///    (GitHub Jermesa-Studio — رخصة MIT، إسناد في THIRD_PARTY_NOTICES.md):
+///    عزم متدرّج حسب الترس + قطع قابض قصير عند كل تبدیل = إحساس سيارة
+///    حقيقية (دفعة ثم سحبة ثم دفعة) بدل منحنى أركيد مستمر واحد.
+/// 7) Downforce أعلى (12 → 22): السيارة «تُغرس» في الأرض كلما زادت السرعة.
 /// </summary>
 [RequireComponent(typeof(Rigidbody))]
 public class MotionCoreVehicleController : VehicleControllerBase
@@ -85,12 +97,34 @@ public class MotionCoreVehicleController : VehicleControllerBase
     /// <summary>سقف التسارع المقاوم — لا نتصلع مع الفيزياء الطبيعية للهبوط.</summary>
     const float PitchDampMax = 12f;
 
+    // --- v2.9.0 عارضات الرف المضادة (نيوتن لكل وحدة فرق انضغاط 0..1) ---
+    /// <summary>أمامية أقوى من الخلفية = عدم توازن باتجاه الاستقرار (understeer
+    /// خفيف يحمي من الدوران الفوقي عند رفع البنزين في المنعطف).</summary>
+    const float AntiRollFrontN = 9000f;
+    const float AntiRollRearN  = 6500f;
+
+    // --- v2.9.0 علبة التروس السداسية (نموذج النسب: JRS VPC — MIT) ---
+    /// <summary>معامل عزم كل ترس (نسبة فعّالية مركّزة — الأرقام الحقيقية للنسب
+    /// تُدمج في منحنى العزم الأساسي لكل خطوة). الترس الأعلى يبقى أعلى من منحنى
+    /// الأركيد القديم (0.35) فلا تتآكل السرعة القصوى المضبوطة.</summary>
+    static readonly float[] GearRatios = { 1.00f, 0.87f, 0.76f, 0.67f, 0.60f, 0.54f };
+    /// <summary>حد التبدیل لأعلى لكل ترس كنسبة من السرعة القضوى المضبوطة.</summary>
+    static readonly float[] GearTop01 = { 0.16f, 0.31f, 0.48f, 0.66f, 0.84f, 1.01f };
+    /// <summary>زمن قطع القابض عند التبدیل (ث) — السحبة المحسوسة.</summary>
+    const float ShiftDipTime = 0.11f;
+    /// <summary>عمق قطع العزم أثناء التبدیل (0.55 = نصف العزم تقريباً).</summary>
+    const float ShiftDipFactor = 0.55f;
+
     // --- حالة الطبقة ---
     float launchTimer;                    // زمن داخل نافذة الإطلاق (ث)
     float brakeRamp;                      // رامب ضغط الفرامل 0..1 (تشخيص)
     float lastLaunchFactor = 1f;          // آخر عامل إطلاق مطبق (تشخيص)
     float lastTcFactor = 1f;              // أدنى معامل جر حالي (تشخيص)
     float lastPitchRate;                  // آخر سرعة ميلان (تشخيص راد/ث)
+    int   gear = 1;                       // الترس الحالي 1..6 (v2.9.0 تشخيص)
+    float shiftTimer;                     // زمن قطع القابض المتبقي (ث)
+    float lastRpm01;                      // دورات المحرك المتخيلة 0..1 (تشخيص)
+    float lastAntiRollN;                  // مجموع قوى العارضات الحيّ (تشخيص)
     /// <summary>معاملات لكل عجلة: [i*2]=يسرى، [i*2+1]=يمنى (تهيّأ على 1).</summary>
     readonly float[] tcFactor  = { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f };
     readonly float[] absFactor = { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f };
@@ -100,6 +134,12 @@ public class MotionCoreVehicleController : VehicleControllerBase
     public float DebugTcFactor      => lastTcFactor;
     public float DebugBrakeRamp     => brakeRamp;
     public float DebugPitchRate     => lastPitchRate;
+    /// <summary>v2.9.0: الترس الحالي (1..6) — يظهر في سطر التشخيص الخامس.</summary>
+    public int   DebugGear      => gear;
+    /// <summary>v2.9.0: دورات المحرك المتخيلة 0..1 داخل نطاق الترس الحالي.</summary>
+    public float DebugRpm01     => lastRpm01;
+    /// <summary>v2.9.0: مجموع قوى عارضات الرف الحية (نيوتن) — 0 في الهواء.</summary>
+    public float DebugAntiRollN => lastAntiRollN;
 
     /// <summary>الحد الأقصى المضبوط (كم/س) قبل أي عقاب عشب — يقرأه Speed01 من الواجهة.</summary>
     public float TunedMaxSpeedKph { get; private set; }
@@ -134,6 +174,10 @@ public class MotionCoreVehicleController : VehicleControllerBase
         ApplyTractionControl();
         ApplyAbsBrakes();
         ApplyPitchDamping();
+
+        // v2.9.0 — الديناميكا الحقيقية: عارضات الرف المضادة + علبة التروس
+        ApplyAntiRollBars();
+        TickGearbox();
     }
 
     // ================= v2.8.0 — طبقة الديناميكا VPP-style =================
@@ -256,6 +300,93 @@ public class MotionCoreVehicleController : VehicleControllerBase
         Body.AddTorque(axis * accel, ForceMode.Acceleration);
     }
 
+    // ================= v2.9.0 — الديناميكا الحقيقية =================
+
+    /// <summary>
+    /// عارضات الرف المضادة (Anti-roll bars): نابض إضافي يصل العجلة اليسرى
+    /// باليمنى على نفس المحور — كلما اختلف انضغاط نابضيهما (جسم يميل في
+    /// منعطف) ولّد قوة مقاومة تنقل الثقل دون أن تغيّر نعومة الاصطدام الرأسي.
+    /// المعادلة القياسية الموثّقة لمحرّكات WheelCollider: النسبة الهندسية
+    /// للانضغاط من نقطة تلامس الأرض، والقوة تُطبق أعلى/أسفل عند مواضع العجلات.
+    /// الأمامية أصلب = ثبات اتجاهي (مقاومة الدوران الفوقي).
+    /// </summary>
+    void ApplyAntiRollBars()
+    {
+        if (!IsGrounded || Body == null || Axles == null || Axles.Length < 2)
+        {
+            lastAntiRollN = 0f;
+            return;
+        }
+        float front = AntiRollAxle(Axles[0], AntiRollFrontN);
+        float rear  = AntiRollAxle(Axles[Axles.Length - 1], AntiRollRearN);
+        lastAntiRollN = Mathf.Abs(front) + Mathf.Abs(rear);
+    }
+
+    /// <summary>قوة عارضة رفّ لمحور واحد (نيوتن موجبة = اليسرى أكثر انضغاطاً).</summary>
+    float AntiRollAxle(VehicleAxle axle, float stiffness)
+    {
+        if (axle == null || axle.leftWheel == null || axle.rightWheel == null) return 0f;
+
+        WheelCollider wl = axle.leftWheel, wr = axle.rightWheel;
+        bool gL = wl.GetGroundHit(out WheelHit hl);
+        bool gR = wr.GetGroundHit(out WheelHit hr);
+        float travelL = TravelRatio(wl, gL, hl);
+        float travelR = TravelRatio(wr, gR, hr);
+
+        float force = (travelL - travelR) * stiffness;
+        if (Mathf.Abs(force) < 1f) return 0f;
+
+        // اليسرى المضغوطة تُدفع للأعلى واليمنى الممتدة تُسحب للأسفل — جسم أكثر استقامة
+        if (gL) Body.AddForceAtPosition(wl.transform.up * -force, wl.transform.position, ForceMode.Force);
+        if (gR) Body.AddForceAtPosition(wr.transform.up * force,  wr.transform.position, ForceMode.Force);
+        return force;
+    }
+
+    /// <summary>نسبة انضغاط التعليق: 0 = مضغوط كلياً، 1 = ممتد كلياً (معلق).
+    /// تُشتق هندسياً من نقطة التلامس تحت مركز العجلة نسبةً إلى مدى النابض.</summary>
+    static float TravelRatio(WheelCollider w, bool grounded, WheelHit hit)
+    {
+        if (!grounded) return 1f;
+        float contactY = -w.transform.InverseTransformPoint(hit.point).y;
+        return Mathf.Clamp01((contactY - w.radius) / Mathf.Max(0.05f, w.suspensionDistance));
+    }
+
+    /// <summary>
+    /// علبة التروس السداسية (نموذج النسب من JRS Vehicle Physics Controller — MIT):
+    /// الترس يُشتق من نطاقات السرعة مع هيستيريّزيس 1.5% فلا «ترجرج» عند الحدود،
+    /// وكل تبدیل يبدأ قطع قابض 0.11ث يخفض العزم إلى 55% — السحبة التي تجعل
+    /// التسارع محسوساً كسيارة حقيقية بدل الدفع المستمر الأركيدي.
+    /// RPM المتخيلة (داخل نطاق الترس) للصوت وسطر التشخيص لاحقاً.
+    /// </summary>
+    void TickGearbox()
+    {
+        shiftTimer = Mathf.Max(0f, shiftTimer - Time.fixedDeltaTime);
+
+        float vmax = Mathf.Max(1f, TunedMaxSpeedKph);
+        float v01 = Mathf.Clamp01(SpeedKph / vmax);
+
+        int target = gear;
+        if (gear < GearTop01.Length && v01 > GearTop01[gear - 1] + 0.005f)
+            target = gear + 1;                       // تجاوز حد الترس = تبدیل لأعلى
+        else if (gear > 1)
+        {
+            float lowPrev = gear >= 3 ? GearTop01[gear - 3] : 0f;
+            if (v01 < lowPrev - 0.015f)              // هبوط تحت بداية الترس السابق
+                target = gear - 1;
+        }
+
+        if (target != gear)
+        {
+            gear = target;
+            shiftTimer = ShiftDipTime;
+        }
+
+        float low = gear >= 2 ? GearTop01[gear - 2] : 0f;
+        float top = GearTop01[Mathf.Clamp(gear - 1, 0, GearTop01.Length - 1)];
+        float band = Mathf.Max(0.02f, top - low);
+        lastRpm01 = Mathf.Clamp01(0.10f + 0.90f * Mathf.Clamp01((v01 - low) / band));
+    }
+
     // ================= الضبط عبر الانعكاس =================
 
     public void Configure(MotionCoreSetup s)
@@ -340,11 +471,12 @@ public class MotionCoreVehicleController : VehicleControllerBase
     /// وتستخدم maxMotorTorque مباشرة، ولهذا كانت السيارة «تتحرك للخلف فقط»
     /// منذ v1.5.0 وبدت أزرار القيادة ميتة في كل الإصدارات التالية.
     /// الإصلاح: ضرب المعامل في MaxMotorTorque (نيوتن.متر الحقيقية).
-    /// المنحنى: عزم كامل حتى 45% من السرعة القصوى ثم ينخفض خطياً حتى 35% —
-    /// تسارع قوي من الوقوف وثبات عالٍ عند السرعة، والسقف الخارجي (المنافسون)
-    /// يقطع العزم فوقه.
     ///
-    /// v2.8.0 Launch Control: داخل نافذة السرعة المنخفضة يبني العزم عبر
+    /// v2.9.0 علبة التروس: منحنى الهبوط الخطي القديم (1 → 0.35) استُعيض عنه
+    /// بنسب الترس الست (1.0 → 0.54) + قطع القابض عند كل تبدیل — التدرّج
+    /// المدرج يُحسّ كتحويلات حقيقية، وقمة أقوى (0.54 > 0.35) مع بقاء السقف
+    /// المضبوط MaxSpeedKph صاحب الكلمة الأخيرة عند السرعة القصوى.
+    /// Launch Control: داخل نافذة السرعة المنخفضة يبني العزم عبر
     /// منحنى SmoothStep من 38% إلى 100% خلال 0.45 ثانية — نفس وظيفة تدنّي
     /// القابض في VPP (عزم متصاعد لا ضربة لحظية). العداد يتقدم فقط أثناء
     /// البنزين الفعلي (الأساس يستدعي هذه الدالة عند throttle > 0.05 حصراً)
@@ -356,9 +488,11 @@ public class MotionCoreVehicleController : VehicleControllerBase
         if (ExternalSpeedCapKph > 1f && SpeedKph >= ExternalSpeedCapKph)
             return 0f;
 
-        float falloff;
-        if (normalizedSpeed < 0.45f) falloff = 1f;
-        else falloff = Mathf.Lerp(1f, 0.35f, (normalizedSpeed - 0.45f) / 0.55f);
+        // v2.9.0: نسبة الترس الحالي + قطع القابض أثناء التبدیل (لحظة سابقة —
+        // TickGearbox يعمل بعد الأساس فالعامل متأخر إطاراً واحداً لا يُذكر)
+        float gearFactor = GearRatios[Mathf.Clamp(gear - 1, 0, GearRatios.Length - 1)];
+        if (shiftTimer > 0f)
+            gearFactor *= Mathf.Lerp(1f, ShiftDipFactor, shiftTimer / ShiftDipTime);
 
         float launchFactor = 1f;
         if (normalizedSpeed < LaunchExitSpeed01)
@@ -373,7 +507,7 @@ public class MotionCoreVehicleController : VehicleControllerBase
         }
 
         lastLaunchFactor = launchFactor;
-        return throttle * falloff * launchFactor * MaxMotorTorque;
+        return throttle * gearFactor * launchFactor * MaxMotorTorque;
     }
 
     /// <summary>عتبة انزلاق مرتفعة قليلاً: دخان/آثار عند انزلاق حقيقي فقط.</summary>
