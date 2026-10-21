@@ -2,13 +2,12 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// TurboRacing - v2.6.0 — حزمة عناصر الحلبة الكرتونية (المكافئ الإجرائي للأصل
-/// «Environment Track Lowpoly: Cartoon Props Mobile Free» الذي لا يمكن تنزيله
-/// خارج حساب Unity - EULA). الأصل يضم 14 مجسماً منخفض المضلعات: أقواس، حواجز،
-/// مخاريط، سياج، أسهم طرق، لافتات، إطارات، إشارات مرور، مدرّج، أعلام، أعمدة
-/// إنارة — بنينا المكافئ بنفس الأسلوب (ألوان رأسية مشبعة، مضلعات قليلة):
+/// TurboRacing - v2.7.0 — عناصر الحزمة الحقيقية «Environment Track Lowpoly:
+/// Cartoon Props Mobile Free» (Asset Store 211494، EULA) تُوضع أولاً عبر
+/// Resources.Load (prefabs جاهزة بمصادمات شبكية)، ويسقط البناء على المكافئ
+/// الإجرائي المُحصّن من v2.6 إن غابت الحزمة. توزيع العناصر:
 /// - مخاريط مرورية عند رؤوس المنعطفات الداخلية (بلا مصادم = قابل للعبور
-///   الكرتوني، ولا يصنع جداراً حتى لو أخطأ قياس)
+///   الكرتوني، ولا يصنع جداراً حتى لو أخطأ قياس) — الآن من الحزمة الحقيقية
 /// - حواجز بلاستيكية / سياج خرساني / مكدّسات إطارات / أعمدة إنارة / لافتات
 ///   منعطفات / أعلام / قوس لافتة / مدرّجان — بمصادمات صناديق حقيقية لكن
 ///   كلها خارج حافة الإسفلت بهامش مُتحقَّق منه (قاعدة v1.8.0: لا جدران غير
@@ -23,7 +22,9 @@ public class TrackProps : MonoBehaviour
     TrackStyle style;
     MeshAccumulator acc;
     GameObject colliderRoot;
+    GameObject realRoot; // v2.7.0: جذر عناصر الحزمة الحقيقية
     int colliders, skipped;
+    int realProps, fallbackProps;
 
     struct Run { public int start; public int len; }
 
@@ -67,6 +68,11 @@ public class TrackProps : MonoBehaviour
         int n = P.Length;
         Vector3 C = Centroid(P);
 
+        // v2.7.0: جذر عناصر الحزمة الحقيقية (Environment Track Lowpoly 211494)
+        realRoot = new GameObject("TrackProps_Real");
+        realRoot.transform.SetParent(transform, false);
+        realRoot.isStatic = true;
+
         colliderRoot = new GameObject("TrackPropsColliders");
         colliderRoot.transform.SetParent(transform, false);
         colliderRoot.isStatic = true; // طبقة افتراضية: أشعة السطح (طبقة 10) لا تراه
@@ -99,8 +105,85 @@ public class TrackProps : MonoBehaviour
         mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
         mr.receiveShadows = true;
 
-        Debug.Log($"[TrackProps] v2.6.0: حزمة العناصر جاهزة — {corners.Count} منعطف، " +
-                  $"{straights.Count} مستقيم، {colliders} مصادم مرئي، استُبعد {skipped}");
+        Debug.Log($"[TrackProps] v2.7.0: عناصر حقيقية من الحزمة {realProps}، بديل إجرائي {fallbackProps}، " +
+                  $"{corners.Count} منعطف، {straights.Count} مستقيم، {colliders} مصادم مرئي، استُبعد {skipped}");
+    }
+
+    // ================= v2.7.0: عناصر Cartoon Props الحقيقية =================
+
+    const string PropRoot = "GameAssets/TrackEnvironmentFree/Prefabs/";
+    readonly Dictionary<string, GameObject> propCache = new Dictionary<string, GameObject>();
+
+    /// <summary>تحميل عنصر حقيقي من الحزمة (يُخزَّن حتى اللاغي لمنع إعادة المحاولة كل مرة).</summary>
+    GameObject LoadProp(string baseName)
+    {
+        if (propCache.TryGetValue(baseName, out GameObject cached)) return cached;
+        GameObject p = Resources.Load<GameObject>(PropRoot + baseName + "_obs");
+        propCache[baseName] = p;
+        return p;
+    }
+
+    /// <summary>وضع عنصر حقيقي مكان نظيره الإجرائي. يعيد false إن غابت الحزمة
+    /// فيسقط البناء على المجسّم الإجرائي (v2.6). targetSpan: البعد الأفقي الأكبر
+    /// المستهدف بالمتر — تصحيح مقياس فقط عند شطط واضح (مفاتيح استيراد FBX).
+    /// keepCollider=false للزينة القابلة للعبور (المخروط مثلاً كغيره في v2.6).</summary>
+    bool PlaceReal(string baseName, Vector3 pos, float yaw, float targetSpan, bool keepCollider)
+    {
+        GameObject prefab = LoadProp(baseName);
+        if (prefab == null) { fallbackProps++; return false; }
+
+        GameObject inst = Instantiate(prefab, pos, Quaternion.Euler(0f, yaw, 0f), realRoot.transform);
+        inst.name = baseName;
+        inst.isStatic = true;
+
+        Renderer[] rends = inst.GetComponentsInChildren<Renderer>();
+        if (rends == null || rends.Length == 0) { Destroy(inst); fallbackProps++; return false; }
+
+        Bounds b = rends[0].bounds;
+        foreach (var r in rends) b.Encapsulate(r.bounds);
+        float maxH = Mathf.Max(b.size.x, b.size.z);
+        float k = 1f;
+        if (maxH > 0.01f)
+        {
+            k = targetSpan / maxH;
+            if (k < 0.4f || k > 2.5f) k = Mathf.Clamp(k, 0.4f, 2.5f); // تصحيح التدريجي فقط
+            else k = 1f;                                             // المقياس الأصلي سليم
+            inst.transform.localScale *= k;
+        }
+        // إنبات القاعدة على الأرض تحليلياً (التوسع يحدث حول المحور)
+        inst.transform.position += new Vector3(0f, (pos.y - b.min.y) * k, 0f);
+
+        if (!keepCollider)
+            foreach (var col in inst.GetComponentsInChildren<Collider>()) Destroy(col);
+
+        realProps++;
+        return true;
+    }
+
+    /// <summary>قوس بصري خالص (بلا مصادمات): عرضه يُطاوع span المطلوب وأسنته
+    /// تُنبت على السطح. بلا مصادمات = صفر خطر عائق على ممر القيادة.</summary>
+    bool PlaceArchVisual(string baseName, Vector3 c, float yaw, float span)
+    {
+        GameObject prefab = LoadProp(baseName);
+        if (prefab == null) { fallbackProps++; return false; }
+
+        GameObject inst = Instantiate(prefab, c, Quaternion.Euler(0f, yaw, 0f), realRoot.transform);
+        inst.name = baseName;
+        inst.isStatic = true;
+        foreach (var col in inst.GetComponentsInChildren<Collider>()) Destroy(col);
+
+        Renderer[] rends = inst.GetComponentsInChildren<Renderer>();
+        if (rends == null || rends.Length == 0) { Destroy(inst); fallbackProps++; return false; }
+
+        Bounds b = rends[0].bounds;
+        foreach (var r in rends) b.Encapsulate(r.bounds);
+        float gotSpan = Mathf.Max(b.size.x, b.size.z);
+        float k = gotSpan > 0.01f ? span / gotSpan : 1f;
+        inst.transform.localScale *= k;
+        inst.transform.position += new Vector3(0f, (c.y - b.min.y) * k, 0f);
+
+        realProps++;
+        return true;
     }
 
     // ================= التموضع =================
@@ -215,11 +298,30 @@ public class TrackProps : MonoBehaviour
             TryAddCollidable(i, side * (ExtAt(i, side) + 2.6f), 1.0f,
                              (p, y) => AddFlag(flagIdx, p, y));
         }
+
+        // v2.7.0: إشارة مرور حقيقية من الحزمة قرب شبكة الانطلاق
+        int li = 4;
+        TryAddCollidable(li, (ExtAt(li, 1) + 2.2f), 1.0f,
+                         (p, y) =>
+                         {
+                             if (!PlaceReal("Traffic_light_free", p, y + 180f, 3.2f, false))
+                                 AddFlag(li, p, y);
+                         });
     }
 
     void BuildBannerArch(List<Run> straights, int n)
     {
-        // قوس اللافتة فوق أطول مستقيم لا يحوي خط البداية (العينة 0)
+        // v2.7.0: قوس «النهاية» الحقيقي من الحزمة عند خط البداية/النهاية (العينة 0)
+        Vector3 c0 = SnapY(style.Points[0]);
+        float yaw0 = YawOf(style.Dirs[0]);
+        float span0 = style.ExtL[0] + style.ExtR[0] + 3.5f;
+        if (PlaceArchVisual("Arch_banner_finish_free", c0, yaw0, span0))
+        {
+            BuildMidTrackArches(straights, n);
+            return;
+        }
+
+        // البديل الإجرائي (v2.6): قوس اللافتة فوق أطول مستقيم لا يحوي خط البداية
         foreach (var run in straights)
         {
             if (run.len < 16 || ContainsIndex(run, 0, n)) continue;
@@ -256,6 +358,22 @@ public class TrackProps : MonoBehaviour
                           yaw + 90f, span * 0.14f, 0.6f, 0.95f, Color.white, Color.white);
             }
             break; // قوس واحد فقط
+        }
+    }
+
+    /// <summary>v2.7.0: قوسا Arch_01 الحقيقيان فوق أطول مستقيمين بعيدين عن البداية.</summary>
+    void BuildMidTrackArches(List<Run> straights, int n)
+    {
+        int placed = 0;
+        foreach (var run in straights)
+        {
+            if (placed >= 2) break;
+            if (run.len < 16 || ContainsIndex(run, 0, n)) continue;
+            int mid = (run.start + run.len / 2) % n;
+            Vector3 c = SnapY(style.Points[mid]);
+            float yaw = YawOf(style.Dirs[mid]);
+            float span = ExtAt(mid, 1) + ExtAt(mid, -1) + 3.0f;
+            if (PlaceArchVisual("Arch_01_free", c, yaw, span)) placed++;
         }
     }
 
@@ -441,18 +559,22 @@ public class TrackProps : MonoBehaviour
 
     // ================= عناصر الحزمة =================
 
-    /// <summary>مخروط مروري برتقالي بحزام أبيض — بلا مصادم (زينة قابلة للعبور).</summary>
+    /// <summary>مخروط مروري برتقالي بحزام أبيض — بلا مصادم (زينة قابلة للعبور).
+    /// v2.7.0: مخروط الحزمة الحقيقي Cone_free بلا مصادم مثل نظيره الإجرائي.</summary>
     void AddCone(Vector3 pos, float yaw)
     {
+        if (PlaceReal("Cone_free", pos, yaw, 0.6f, false)) return;
         AddRotBox(acc, pos, yaw, 0.5f, 0.5f, 0.05f, BaseDark, BaseDark);
         AddFrustum4(acc, pos + Vector3.up * 0.05f, yaw, 0.185f, 0.125f, 0.24f, ConeOrange, false);
         AddFrustum4(acc, pos + Vector3.up * 0.29f, yaw, 0.125f, 0.10f, 0.10f, ConeWhite, false);
         AddFrustum4(acc, pos + Vector3.up * 0.39f, yaw, 0.10f, 0.025f, 0.18f, ConeOrange, true);
     }
 
-    /// <summary>حواجز بلاستيكية بيضاء بحزام أحمر وقدمان — مصادم 2م.</summary>
+    /// <summary>حواجز بلاستيكية بيضاء بحزام أحمر وقدمان — مصادم 2م.
+    /// v2.7.0: حاجز الحزمة الحقيقي بمصادم الشبكة الداخلي.</summary>
     void AddBarrier(Vector3 pos, float yaw)
     {
+        if (PlaceReal("Barrier_free", pos, yaw, 2.0f, true)) return;
         AddRotBox(acc, pos, yaw, 2.0f, 0.42f, 0.72f, BarrierWhite, BarrierWhite * 0.92f);
         AddRotBox(acc, pos + Vector3.up * 0.30f, yaw, 2.0f, 0.47f, 0.14f, SignRed, SignRed);
         Vector3 fwd = new Vector3(Mathf.Sin(yaw * Mathf.Deg2Rad), 0f, Mathf.Cos(yaw * Mathf.Deg2Rad));
@@ -461,9 +583,10 @@ public class TrackProps : MonoBehaviour
         AddCollider(pos, yaw, new Vector3(0.5f, 0.85f, 2.05f));
     }
 
-    /// <summary>مكدّس 3 إطارات بحزام أبيض — مصادم متر واحد.</summary>
+    /// <summary>مكدّس إطارات — مصادم متر واحد. v2.7.0: إطار الحزمة الحقيقي.</summary>
     void AddTireStack(Vector3 pos, float yaw)
     {
+        if (PlaceReal("Tire_free", pos, yaw, 0.9f, true)) return;
         acc.AddCylinder(pos + Vector3.up * 0.12f, 0.36f, 0.24f, 8, 0.5f, TireDark);
         acc.AddCylinder(pos + Vector3.up * 0.36f, 0.36f, 0.24f, 8, 0.5f, TireMid);
         acc.AddCylinder(pos + Vector3.up * 0.36f, 0.372f, 0.07f, 8, 0.5f, ConeWhite);
@@ -471,17 +594,22 @@ public class TrackProps : MonoBehaviour
         AddCollider(pos, yaw, new Vector3(0.8f, 0.75f, 0.8f));
     }
 
-    /// <summary>سياج خرساني بخط أحمر علوي — مصادم 3.8م.</summary>
+    /// <summary>سياج خرساني — مصادم 3.8م. v2.7.0: سياج الحزمة الحقيقي.</summary>
     void AddFence(Vector3 pos, float yaw)
     {
+        if (PlaceReal("Fence_concrete_free", pos, yaw, 3.8f, true)) return;
         AddRotBox(acc, pos, yaw, 3.8f, 0.35f, 0.95f, Concrete, Concrete * 0.9f);
         AddRotBox(acc, pos + Vector3.up * 0.85f, yaw, 3.8f, 0.38f, 0.10f, SignRed, SignRed);
         AddCollider(pos, yaw, new Vector3(0.4f, 1.0f, 3.85f));
     }
 
-    /// <summary>عمود إنارة 6م بذراع ومصباح نحو الطريق — مصادم عمودي رفيع.</summary>
+    /// <summary>عمود إنارة 6م — مصادم عمودي رفيع. v2.7.0: عمود الحزمة الحقيقي
+    /// (يوجَّه بذراعه نحو الطريق بقدر الإمكان).</summary>
     void AddLightPole(int i, Vector3 pos, float yaw)
     {
+        Vector3 toward0 = style.Points[i] - pos; toward0.y = 0f;
+        toward0 = toward0.sqrMagnitude > 0.001f ? toward0.normalized : -RightAt(i);
+        if (PlaceReal("Pole_light_free", pos, YawOf(toward0), 6.0f, true)) return;
         acc.AddCylinder(pos + Vector3.up * 3.1f, 0.09f, 6.2f, 6, 0.5f, PoleGray);
 
         Vector3 toward = style.Points[i] - pos; toward.y = 0f;
@@ -494,9 +622,12 @@ public class TrackProps : MonoBehaviour
         AddCollider(pos, yaw, new Vector3(0.3f, 6.2f, 0.3f));
     }
 
-    /// <summary>علم برتقالي على سارية 3.8م (القماش يستقيل بعيداً عن الطريق).</summary>
+    /// <summary>علم على سارية 3.8م. v2.7.0: علم الحزمة الحقيقي.</summary>
     void AddFlag(int i, Vector3 pos, float yaw)
     {
+        Vector3 away0 = pos - style.Points[i]; away0.y = 0f;
+        away0 = away0.sqrMagnitude > 0.001f ? away0.normalized : -RightAt(i);
+        if (PlaceReal("Flag_free", pos, YawOf(away0), 3.8f, true)) return;
         acc.AddCylinder(pos + Vector3.up * 1.9f, 0.05f, 3.8f, 6, 0.5f, PoleGray);
         Vector3 away = pos - style.Points[i]; away.y = 0f;
         away = away.sqrMagnitude > 0.001f ? away.normalized : -RightAt(i);
@@ -508,9 +639,11 @@ public class TrackProps : MonoBehaviour
         AddCollider(pos, yaw, new Vector3(0.18f, 3.8f, 0.18f));
     }
 
-    /// <summary>لافتة منعطف صفراء بثلاث شيفرونات داكنة تواجه القادمين.</summary>
+    /// <summary>لافتة منعطف تواجه القادمين. v2.7.0: أسهم الحزمة الحقيقية بالتناوب.</summary>
     void AddCornerSign(int i, Vector3 pos, float yaw)
     {
+        string arrow = (i & 1) == 0 ? "Arrow_01_free" : "Arrow_02_free";
+        if (PlaceReal(arrow, pos, yaw + 180f, 2.2f, true)) return; // الوجه ضد اتجاه السير
         Vector3 travel = style.Dirs[i];
         Vector3 rgt = RightAt(i);
 
@@ -526,9 +659,10 @@ public class TrackProps : MonoBehaviour
         AddCollider(pos, yaw, new Vector3(0.5f, 1.6f, 0.5f));
     }
 
-    /// <summary>مدرّج جمهور 20م: قاعدة + 4 صفوف ملوّنة + سقف على 4 أعمدة.</summary>
+    /// <summary>مدرّج جمهور — v2.7.0: مدرّج الحزمة الحقيقي (مصادم الشبكة الداخلي).</summary>
     void AddTribune(int i, Vector3 pos, float yaw)
     {
+        if (PlaceReal("Tribune_free", pos, yaw, 20f, true)) return;
         Vector3 away = pos - style.Points[i]; away.y = 0f;
         away = away.sqrMagnitude > 0.001f ? away.normalized : -RightAt(i);
         Vector3 along = new Vector3(Mathf.Sin(yaw * Mathf.Deg2Rad), 0f, Mathf.Cos(yaw * Mathf.Deg2Rad));

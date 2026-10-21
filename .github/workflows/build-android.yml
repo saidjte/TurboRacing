@@ -27,7 +27,9 @@ jobs:
         run: |
           rsync -a assets-repo/Assets/ ./Assets/
           echo "--- imported asset files ---"
-          find Assets/Resources/GameAssets Assets/Scripts/Prometeo -type f | sort
+          find Assets/MapEditor Assets/Resources/GameAssets Assets/Scripts/Prometeo -type f | sort | head -80
+          echo "--- new in v2.7.0: AK Road Editor + Cartoon Props + RSK audio ---"
+          ls Assets/MapEditor/Scripts Assets/Resources/GameAssets/TrackEnvironmentFree/Prefabs Assets/Resources/GameAssets/RSK_Audio
 
       - name: Cache Unity Library
         uses: actions/cache@v4

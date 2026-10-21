@@ -126,6 +126,8 @@ public class GameBootstrap : MonoBehaviour
         // v2.6.0: التزيين بأسلوب حزم المتجر (المكافئ الإجرائي):
         track.AddComponent<TrackStyle>(); // طلاء الطريق بأسلوب AK Road Editor (بلا مصادمات)
         track.AddComponent<TrackProps>(); // حزمة عناصر Cartoon Props حول الحلبة
+        // v2.7.0: الأصول الحقيقية — طريق AK Road Editor + حواجز RailingGenerator:
+        track.AddComponent<AKRoadTrack>();
     }
 
     // ================= الكراج (v1.4.0) =================

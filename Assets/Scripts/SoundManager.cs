@@ -29,6 +29,9 @@ public class SoundManager : MonoBehaviour
 
     AudioClip beepClip, goClip, lapClip, recordClip, finishClip, crashClip, clickClip;
 
+    // --- v2.7.0: أصوات العد التنازلي الحقيقية (Racing Starter Kit FREE 169750) ---
+    AudioClip rskGetReady, rskGo;
+
     // --- أصوات المحرك الحقيقية (v1.3.0) ---
     AudioClip realIgnition, realIdle, realGear1, realGear2, realGear3;
     bool realEngine;
@@ -68,6 +71,12 @@ public class SoundManager : MonoBehaviour
         realGear2      = Resources.Load<AudioClip>("GameAssets/Sounds/2CV6SecondGear");
         realGear3      = Resources.Load<AudioClip>("GameAssets/Sounds/2CV6ThirdGear");
         realEngine = realIdle != null && realGear1 != null && realGear2 != null && realGear3 != null;
+
+        // --- v2.7.0: أصوات العد التنازلي الحقيقية (RSK) مع بقاء المخلّقة احتياطاً ---
+        rskGetReady = Resources.Load<AudioClip>("GameAssets/RSK_Audio/PreRaceCountdownGetReadySFX");
+        rskGo       = Resources.Load<AudioClip>("GameAssets/RSK_Audio/PreRaceCountdownGoSFX");
+        if (rskGetReady != null || rskGo != null)
+            Debug.Log($"[SoundManager] v2.7.0: أصوات RSK جاهزة — GetReady:{rskGetReady != null} Go:{rskGo != null}");
 
         if (realEngine)
         {
@@ -241,8 +250,15 @@ public class SoundManager : MonoBehaviour
     /// <summary>نقرة العد التنازلي (3..2..1).</summary>
     public void PlayCountBeep() => PlaySfx(beepClip, 0.5f);
 
-    /// <summary>نغمة GO! الأعلى والأطول.</summary>
-    public void PlayGo() => PlaySfx(goClip, 0.55f);
+    /// <summary>v2.7.0: «استعد» — مقطع RSK الحقيقي عند بداية العد التنازلي.</summary>
+    public void PlayGetReady() { if (rskGetReady != null) PlaySfx(rskGetReady, 0.7f); }
+
+    /// <summary>نغمة GO! — v2.7.0: مقطع RSK الحقيقي عند توفره، والمخلّق احتياطاً.</summary>
+    public void PlayGo()
+    {
+        if (rskGo != null) PlaySfx(rskGo, 0.65f);
+        else PlaySfx(goClip, 0.55f);
+    }
 
     /// <summary>رنة عبور خط النهاية بلفة صحيحة.</summary>
     public void PlayLap() => PlaySfx(lapClip, 0.5f);

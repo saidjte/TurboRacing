@@ -123,6 +123,9 @@ public class RaceFlow : MonoBehaviour
         SetCarFrozen(true);
         SetCameraMode(follow: true);
 
+        // (v2.7.0) «استعد» — مقطع RSK الحقيقي عند لحظة بداية العد التنازلي
+        if (SoundManager.Instance != null) SoundManager.Instance.PlayGetReady();
+
         // (v0.7.0) نقرة الثانية الأولى + خمول المحرك أثناء العد
         if (SoundManager.Instance != null)
         {
