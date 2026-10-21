@@ -117,6 +117,14 @@ public class CarController : MonoBehaviour
     public int DebugBoundButtons => boundButtons;           // الأزرار المربوطة n/4
     public int DebugTouchCount => Input.touchCount;         // عدد الأصابع الفيزيائي
     public int DebugGroundedWheels { get; private set; }    // عجلات ملامسة للأرض x/4
+
+    /// <summary>(v2.8.0) قنوات تشخيص ديناميكا طبقة VPP-style عبر المتحكم:
+    /// L = عامل الإطلاق (رامب القابض)، T = أدنى معامل جر (تراكيشن كونترول)،
+    /// r = رامب ضغط الفرملة، P = سرعة الميلان الأمامي (راد/ث).</summary>
+    public float DebugLaunchFactor => mc != null ? mc.DebugLaunchFactor : 1f;
+    public float DebugTcFactor     => mc != null ? mc.DebugTcFactor : 1f;
+    public float DebugBrakeRamp    => mc != null ? mc.DebugBrakeRamp : 0f;
+    public float DebugPitchRate    => mc != null ? mc.DebugPitchRate : 0f;
     /// <summary>مُصدِّر مادة الطلاء (يستخدمه SurfaceChecker للتلطيخ على العشب).</summary>
     public MeshRenderer PaintRenderer => paintRenderer;
 

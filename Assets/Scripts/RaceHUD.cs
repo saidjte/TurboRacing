@@ -329,8 +329,19 @@ public class RaceHUD : MonoBehaviour
         else inp = "?";
         string src = TrackBuilder.LineSourceTag;
 
+        // (v2.8.0) السطر الرابع — ديناميكا طبقة VPP-style حية:
+        //   L1.00  عامل الإطلاق (0.38..1.00 أثناء رامب القابض من الوقوف)
+        //   T1.0   أدنى معامل جر للعجلات المدفوعة (تراكيشن كونترول؛ <1 = قص عزم جارٍ)
+        //   P-0.32 سرعة الميلان الأمامي بالراد/ث (اهتزاز قبوة كبير = مشكلة تعليق)
+        //   r0.6   رامب ضغط الفرملة (يتصاعد 0→1 أثناء الفرملة)
+        string dyn = carCtrl != null
+            ? $"L{carCtrl.DebugLaunchFactor:0.00} T{carCtrl.DebugTcFactor:0.0} " +
+              $"P{carCtrl.DebugPitchRate:+0.00;-0.00} r{carCtrl.DebugBrakeRamp:0.0}"
+            : "?";
+
         dbgText.text = $"X {p.x:0.#}  Y {p.y:0.#}  Z {p.z:0.#}\n" +
                        $"{surf}   line {(lineD >= 0f ? lineD.ToString("0") + "m" : "-")}\n" +
-                       $"{src}   {spd:0}km/h  {inp}";
+                       $"{src}   {spd:0}km/h  {inp}\n" +
+                       $"{dyn}";
     }
 }
